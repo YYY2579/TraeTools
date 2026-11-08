@@ -84,7 +84,10 @@ jobs:
       - name: Build (${{ matrix.rid }})
         run: dotnet build TraeTools.csproj -c Release -r ${{ matrix.rid }} --self-contained true
 
+      # 只在原生架构上执行自检：runner 是 Apple Silicon，跑 osx-x64 产物需要 Rosetta，
+      # 失败原因是「无法执行」而不是代码问题。这个 job 的目的是「能不能编」，x64 编过即可。
       - name: Headless self-tests
+        if: matrix.rid == 'osx-arm64'
         run: |
           dotnet bin/Release/net10.0/${{ matrix.rid }}/TraeTools.dll --crypto-selftest
           dotnet bin/Release/net10.0/${{ matrix.rid }}/TraeTools.dll --log-selftest
