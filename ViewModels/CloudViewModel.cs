@@ -38,6 +38,50 @@ public partial class CloudViewModel : ViewModelBase
     [ObservableProperty]
     private string _warningText = "云端签到使用 TRAE_SESSION 作为凭证（Session 约 14 天有效；JWT 仅约 8 小时，由 Session 自动换新）。Session 过期后请重新登录 Trae 并重新部署。";
 
+    /// <summary>提示条是否为「严重」态（红色）：Session 已过期或仅剩 ≤3 天，或云端最近一次运行失败。</summary>
+    [ObservableProperty]
+    private bool _warningIsCritical;
+
+    /// <summary>云端最近一次运行的结论（success / failure / null），用于和凭证有效期合并告警。</summary>
+    private string? _lastRunConclusion;
+
+    // ===== 「上次云端运行结果」面板（不实时轮询，只在打开页面/部署后按上一次结果提醒）=====
+
+    /// <summary>是否展示上次运行结果面板（有过运行记录才显示）。</summary>
+    [ObservableProperty]
+    private bool _hasLastRun;
+
+    /// <summary>结论徽章文案：成功 / 失败 / 运行中。</summary>
+    [ObservableProperty]
+    private string _lastRunBadge = "";
+
+    /// <summary>是否为失败（驱动红色样式与「如何修复」区的显示）。</summary>
+    [ObservableProperty]
+    private bool _lastRunFailed;
+
+    /// <summary>时间行，如「2026-11-07 08:24（第 12 次运行）」。</summary>
+    [ObservableProperty]
+    private string _lastRunWhen = "";
+
+    /// <summary>失败原因（由运行日志归类）。成功时为空。</summary>
+    [ObservableProperty]
+    private string _lastRunReason = "";
+
+    /// <summary>修复建议。</summary>
+    [ObservableProperty]
+    private string _lastRunSuggestion = "";
+
+    /// <summary>数据来自本地缓存（本次没能联网确认），文案需标注，避免用户误以为是刚查到的。</summary>
+    [ObservableProperty]
+    private bool _lastRunFromCache;
+
+    /// <summary>诊断中（拉取日志需要几秒，给个提示避免用户以为卡住）。</summary>
+    [ObservableProperty]
+    private bool _isDiagnosing;
+
+    /// <summary>本次会话是否已经诊断过该 runId（避免每次进页面都下载日志）。</summary>
+    private long _diagnosedRunId;
+
     /// <summary>部署操作日志（底部深色日志区）。</summary>
     [ObservableProperty]
     private string _deployLog = "[云端部署] 已就绪\n点击「授权 / 部署」开始发布签到任务到 GitHub Actions";
@@ -121,7 +165,13 @@ public partial class CloudViewModel : ViewModelBase
 
             DeploymentStatus status;
             try { status = await _ghApi.GetDeploymentStatusAsync(token, login); }
-            catch (Exception ex) { AccountHelpers.AppLog("cloud", "", $"检测部署状态异常：{ex.Message}"); return; }
+            catch (Exception ex)
+            {
+                AccountHelpers.AppLog("cloud", "", $"检测部署状态异常：{ex.Message}");
+                // 拿不到最新状态时，至少把上次已知的运行结果摆出来（并标注是缓存）
+                ShowCachedLastRun();
+                return;
+            }
 
             if (!status.IsAuthorized) { ClearCloudAuth("GitHub 授权已失效，请重新授权"); return; }
 
@@ -135,6 +185,8 @@ public partial class CloudViewModel : ViewModelBase
                     : $"已部署完成（1 个账号），云端每天北京时间 {CloudCheckinTime} 自动签到";
                 ActionButtonText = "重新部署";
                 LastRun = await TryGetLastRunAsync(token, login);
+                // 已部署：三步回填为已完成（冷启动进页面也能看到真实状态，而不是永远灰点）
+                MarkAllSteps("ok");
                 // 账号重新登录/增删后，把最新 Session 自动同步到云端 Secret，避免云端一直用旧值直到过期
                 await TrySyncCloudSecretsAsync(cfg, token, login);
             }
@@ -142,32 +194,242 @@ public partial class CloudViewModel : ViewModelBase
             {
                 StateText = "已授权：" + login + "（尚未部署）";
                 ActionButtonText = "一键部署到云端";
+                MarkAllSteps("pending");
             }
+
+            // 凭证有效期（原先 CredentialExpiry 从未赋值，界面恒显示「—」）
+            UpdateCredentialExpiry();
         }
         catch
         {
             StateText = "检测部署状态失败，仍可手动部署";
             ActionButtonText = "一键部署到云端";
+            ShowCachedLastRun();   // 断网/代理故障时也别让用户对着空白区发呆
         }
     }
+
+    /// <summary>把部署流程三步统一置为某状态（pending/ok/warn）。</summary>
+    private void MarkAllSteps(string status)
+    {
+        foreach (var s in Steps) s.Status = status;
+    }
+
+    /// <summary>
+    /// 取「最老的那个启用账号 Session」的剩余天数：最老的一过期，云端就会有一个账号签不上。
+    /// 返回 (剩余天数, 是否估算)。无账号或无任何时间戳时返回 (int.MaxValue, false)。
+    /// </summary>
+    private (int LeftDays, bool Estimated) SessionLeftDays()
+    {
+        const int SessionLifeDays = 14;
+        var cfg = MainViewModel.AppConfig;
+        var enabled = cfg?.Accounts.Where(a => a.Enabled).ToList() ?? new();
+        if (enabled.Count == 0) return (int.MaxValue, false);
+
+        DateTime oldest = DateTime.MaxValue;
+        bool estimated = false;
+        foreach (var acc in enabled)
+        {
+            if (acc.SessionUpdatedAt is { } s) { if (s < oldest) oldest = s; }
+            else if (acc.TokenUpdatedAt is { } t) { if (t < oldest) oldest = t; estimated = true; }
+        }
+        if (oldest == DateTime.MaxValue) return (int.MaxValue, false);
+
+        int usedDays = Math.Max(0, (int)(DateTime.Now - oldest).TotalDays);
+        return (SessionLifeDays - usedDays, estimated);
+    }
+
+    /// <summary>
+    /// 计算并展示云端凭据（Session）剩余寿命。
+    /// Session 约 14 天有效，且**不会**因换取新 JWT 而续期，所以基准取
+    /// <see cref="TraeCheckin.TraeAccount.SessionUpdatedAt"/>（登录/换新 Session 时写入）；
+    /// 旧配置没有该字段时回退用 TokenUpdatedAt 估算，并在文案里标注。
+    /// </summary>
+    private void UpdateCredentialExpiry()
+    {
+        var cfg = MainViewModel.AppConfig;
+        var enabled = cfg?.Accounts.Where(a => a.Enabled).ToList() ?? new();
+
+        if (enabled.Count == 0)
+        {
+            CredentialExpiry = "—";
+            WarningIsCritical = false;
+            WarningText = "尚未配置启用账号，部署后云端将按启用账号的 Session 运行签到。";
+            return;
+        }
+
+        var (leftDays, estimated) = SessionLeftDays();
+        if (leftDays == int.MaxValue)
+        {
+            CredentialExpiry = "未知（建议重新登录一次）";
+            WarningIsCritical = true;
+            WarningText = "无法确定云端 Session 的签发时间。若云端签到失败，请在本程序重新登录 Trae 后重新部署。";
+            return;
+        }
+
+        string est = estimated ? "（按 Token 更新时间估算）" : "";
+
+        // 卡片里只放短文案：四列 Grid 宽度有限，长句子会被右侧裁掉；
+        // 「估算」口径放到下方提示条（那里有换行空间）。
+        CredentialExpiry = leftDays <= 0
+            ? "已过期，需重新登录"
+            : $"约 {leftDays} 天后过期";
+
+        bool lastRunFailed = _lastRunConclusion == "failure";
+        WarningIsCritical = leftDays <= 3 || lastRunFailed;
+
+        WarningText = leftDays switch
+        {
+            <= 0 => "云端 Session 已过期，云端签到会失败。请在本程序重新登录 Trae，然后点「重新部署」刷新 Secret。",
+            <= 3 => $"云端 Session 仅剩约 {leftDays} 天，建议尽快重新登录并「重新部署」，避免云端签到中断。"
+                    + (lastRunFailed ? "（最近一次云端运行已失败，很可能就是这个原因）" : ""),
+            _ => lastRunFailed
+                    ? "云端最近一次签到运行失败，具体原因与修复方式见下方「上次云端运行结果」。"
+                    : $"云端签到使用 TRAE_SESSION 作为凭证（约 14 天有效，与换取 JWT 无关），剩余约 {leftDays} 天{est}。"
+        };
+    }
+
+    private static string FormatRunTime(string? iso)
+    {
+        if (string.IsNullOrEmpty(iso)) return "—";
+        return DateTime.TryParse(iso, out var dt) ? dt.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : iso.Replace("T", " ").TrimEnd('Z');
+    }
+
+    private static DateTime? ParseRunTime(string? iso)
+        => DateTime.TryParse(iso, out var dt) ? dt.ToLocalTime() : null;
 
     private async Task<string> TryGetLastRunAsync(string token, string login)
     {
         try
         {
             var run = await _ghApi.GetLatestRunAsync(token, login);
-            if (run == null) return "—";
-            var conclusion = run.Conclusion switch
+            if (run == null)
+            {
+                _lastRunConclusion = null;
+                ShowCachedLastRun();
+                return "—";
+            }
+
+            _lastRunConclusion = run.Conclusion;
+            await ApplyLastRunAsync(run, token, login);
+
+            var conclusionText = run.Conclusion switch
             {
                 "success" => "成功",
                 "failure" => "失败",
                 _ => run.Status ?? "运行中"
             };
-            if (run.Conclusion == "failure")
-                AppendLog("注意：云端最近一次签到失败，常见原因是 Session 已过期或命中风控。请重新登录 Trae 后再点「重新部署」，或到 Actions 查看日志。");
-            return $"{run.CreatedAt?.Replace("T", " ").Substring(0, 16) ?? "—"}（{conclusion}）";
+            return $"{FormatRunTime(run.CreatedAt)}（{conclusionText}）";
         }
-        catch { return "—"; }
+        catch
+        {
+            _lastRunConclusion = null;
+            ShowCachedLastRun();
+            return "—";
+        }
+    }
+
+    /// <summary>
+    /// 把一次运行的结果落到面板上，并在失败时给出具体原因与修复方式。
+    ///
+    /// 设计口径（按需求）：**不做实时轮询**，只在打开页面/部署结束时读「上一次」结果；
+    /// 原因是拉日志有开销，而云端签到每天只跑一次，实时探测没有收益。
+    /// 失败原因按 run 日志归类，并按 runId 缓存，同一次运行不会反复下载日志。
+    /// </summary>
+    private async Task ApplyLastRunAsync(WorkflowRunInfo run, string token, string login)
+    {
+        var cfg = MainViewModel.AppConfig;
+        HasLastRun = true;
+        LastRunFromCache = false;
+        LastRunFailed = run.Conclusion == "failure";
+        LastRunBadge = run.Conclusion switch
+        {
+            "success" => "成功",
+            "failure" => "失败",
+            _ => run.Status ?? "运行中"
+        };
+        LastRunWhen = $"{FormatRunTime(run.CreatedAt)}" + (run.RunNumber > 0 ? $"（第 {run.RunNumber} 次运行）" : "");
+
+        void Persist(string reason, string suggestion)
+        {
+            if (cfg == null) return;
+            cfg.CloudLastRunId = run.Id;
+            cfg.CloudLastRunConclusion = run.Conclusion ?? "";
+            cfg.CloudLastRunAt = ParseRunTime(run.CreatedAt);
+            cfg.CloudLastRunReason = reason;
+            cfg.CloudLastRunSuggestion = suggestion;
+            try { cfg.Save(); } catch { /* 落盘失败不影响展示 */ }
+        }
+
+        if (!LastRunFailed)
+        {
+            LastRunReason = "";
+            LastRunSuggestion = "";
+            // 成功即清掉历史失败原因，避免下次离线时误报旧故障
+            if (cfg == null || cfg.CloudLastRunId != run.Id || !string.IsNullOrEmpty(cfg.CloudLastRunReason))
+                Persist("", "");
+            return;
+        }
+
+        // 1) 同一次 run 已有缓存结论 → 直接用，不重复下载日志
+        if (cfg != null && cfg.CloudLastRunId == run.Id && !string.IsNullOrEmpty(cfg.CloudLastRunReason))
+        {
+            LastRunReason = cfg.CloudLastRunReason;
+            LastRunSuggestion = cfg.CloudLastRunSuggestion;
+            return;
+        }
+
+        // 2) 本次会话已诊断过同一 run → 不重复诊断
+        if (_diagnosedRunId == run.Id && !string.IsNullOrEmpty(LastRunReason)) return;
+
+        // 3) 拉日志诊断
+        IsDiagnosing = true;
+        try
+        {
+            var d = await _ghApi.DiagnoseRunFailureAsync(token, login, run.Id);
+            _diagnosedRunId = run.Id;
+
+            // 日志拿不到时的兜底：Session 已过期本身就是最可能的原因，直接点明
+            var (leftDays, _) = SessionLeftDays();
+            if (d.Key == "unknown" && leftDays <= 0)
+            {
+                d.Key = "session";
+                d.Reason = "云端登录态已过期（Session 超过 14 天），运行日志已无法获取";
+                d.Suggestion = "在本程序重新登录 Trae，然后点「重新部署」把新 Session 写回云端。";
+            }
+
+            LastRunReason = d.Reason;
+            LastRunSuggestion = d.Suggestion;
+            Persist(d.Reason, d.Suggestion);
+            AppendLog($"上次云端运行失败：{d.Reason}");
+        }
+        catch (Exception ex)
+        {
+            LastRunReason = "运行失败，原因识别时出错：" + ex.Message;
+            LastRunSuggestion = "点「打开 Actions」查看日志。";
+        }
+        finally
+        {
+            IsDiagnosing = false;
+        }
+    }
+
+    /// <summary>拿不到最新运行记录时，退回展示本地上次已知结果（并标注可能已过期）。</summary>
+    private void ShowCachedLastRun()
+    {
+        var cfg = MainViewModel.AppConfig;
+        if (cfg == null || string.IsNullOrEmpty(cfg.CloudLastRunConclusion))
+        {
+            HasLastRun = false;
+            return;
+        }
+
+        HasLastRun = true;
+        LastRunFromCache = true;
+        LastRunFailed = cfg.CloudLastRunConclusion == "failure";
+        LastRunBadge = cfg.CloudLastRunConclusion == "failure" ? "失败" : "成功";
+        LastRunWhen = (cfg.CloudLastRunAt?.ToString("yyyy-MM-dd HH:mm") ?? "—") + "（本地缓存）";
+        LastRunReason = cfg.CloudLastRunReason;
+        LastRunSuggestion = cfg.CloudLastRunSuggestion;
     }
 
     private void ClearCloudAuth(string reason)
@@ -181,6 +443,9 @@ public partial class CloudViewModel : ViewModelBase
         }
         _pendingCode = null;
         DeviceCodeText = "";
+        MarkAllSteps("pending");
+        CredentialExpiry = "—";
+        WarningIsCritical = false;
         AppendLog(reason);
         RefreshCloudState(isDeployFlow: false);
     }
@@ -486,6 +751,7 @@ public partial class CloudViewModel : ViewModelBase
                       + "建议错开 08:00 高峰、减少云端账号数；② GitHub Actions 环境异常。请到 Actions 日志确认后再判断。"
                     : $"运行结论：{conclusion}，请到 GitHub Actions 页面查看日志。");
             }
+            UpdateCredentialExpiry();
             await RefreshDeploymentStateAsync();
         }
         catch (Exception ex)
@@ -729,11 +995,43 @@ public partial class CloudViewModel : ViewModelBase
         }
     }
 
-    /// <summary>更新凭证：完整流程需重新登录 Trae 换取新 Session 后重新部署。</summary>
+    /// <summary>
+    /// 重新登录当前激活账号：云端失败最常见的原因是 Session 过期，而修复只能靠重新登录。
+    /// 登录成功后 SessionUpdatedAt 会刷新，随后 RefreshDeploymentStateAsync 里的
+    /// TrySyncCloudSecretsAsync 会把新 Session 自动写回云端 Secret。
+    /// </summary>
     [RelayCommand]
-    private void UpdateCredential()
+    private async Task Relogin()
     {
-        AppendLog("更新凭证：请在本程序重新登录 Trae 后，再执行一次「一键部署」刷新云端 Secret（TRAE_SESSION 约 14 天有效）");
+        try
+        {
+            var cfg = MainViewModel.AppConfig;
+            var owner = UiHost.MainWindow;
+            var acc = cfg?.Accounts.FirstOrDefault(a => a.Id == cfg.ActiveAccountId)
+                      ?? cfg?.Accounts.FirstOrDefault();
+            if (cfg == null || owner == null || acc == null)
+            {
+                AppendLog("没有可重新登录的账号，请先到「设置 → 账号管理」添加");
+                return;
+            }
+
+            var dlg = new Views.LoginWindow(acc);
+            bool ok = await dlg.ShowDialog<bool>(owner);
+            if (!ok)
+            {
+                AppendLog("已取消重新登录");
+                return;
+            }
+
+            try { cfg.Save(); } catch { /* 忽略 */ }
+            AppendLog("本地登录态已更新，正在把新的 Session 同步到云端…");
+            UpdateCredentialExpiry();
+            await RefreshDeploymentStateAsync();   // 内含 TrySyncCloudSecretsAsync
+        }
+        catch (Exception ex)
+        {
+            AppendLog("重新登录异常：" + ex.Message);
+        }
     }
 }
 

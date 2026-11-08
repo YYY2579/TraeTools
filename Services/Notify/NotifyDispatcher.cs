@@ -116,25 +116,48 @@ public static class NotifyDispatcher
     }
 
     /// <summary>
-    /// 签到结束后批量推送多账号结果。全失败时不推送（避免用无意义的消息打扰用户）。
+    /// 签到结束后的批量结果推送。
+    /// 全部成功 → 受「签到完成后推送」总开关约束（成功摘要属于可选的日常播报）。
+    /// 有失败 → **不受总开关约束**：失败才是真正需要让人知道的事，否则用户永远只会收到「一切正常」。
     /// </summary>
     public static async Task<IReadOnlyList<ChannelOutcome>> SendCheckinBatchAsync(
         AppConfig? cfg, IReadOnlyList<(string Name, bool Ok, double Gained, string Reason)> results)
     {
         if (cfg == null || results.Count == 0) return Array.Empty<ChannelOutcome>();
-        if (!cfg.NotifyOnCheckin) return Array.Empty<ChannelOutcome>();
-        if (!results.Any(r => r.Ok)) return Array.Empty<ChannelOutcome>();
 
-        var okCount = results.Count(r => r.Ok);
-        var title = $"Trae 签到结果（{okCount}/{results.Count} 成功）";
+        int okCount = results.Count(r => r.Ok);
+        bool anyFailure = okCount < results.Count;
+
+        if (!anyFailure && !cfg.NotifyOnCheckin) return Array.Empty<ChannelOutcome>();
+
+        var title = anyFailure
+            ? $"Trae 签到异常（{okCount}/{results.Count} 成功）"
+            : $"Trae 签到结果（{okCount}/{results.Count} 成功）";
 
         var sb = new StringBuilder();
         sb.AppendLine($"时间：{DateTime.Now:yyyy-MM-dd HH:mm}");
         foreach (var r in results)
             sb.AppendLine((r.Ok ? "✅ " : "⚠️ ") + r.Name + (r.Ok ? $"  获得 {r.Gained:0} 积分" : $"  失败：{r.Reason}"));
 
+        if (anyFailure)
+        {
+            sb.AppendLine();
+            sb.AppendLine("如何处理：");
+            sb.AppendLine("· 「会话失效」→ 在本程序重新登录该账号，再点「重新部署」刷新云端 Secret");
+            sb.AppendLine("· 「9074 / 参与用户太多」→ 错开整点时段，或为该账号换发设备号后重新部署");
+            sb.AppendLine("· 云端定时任务未运行 → 到 GitHub Actions 查看该次运行日志");
+        }
+
         return await SendAsync(cfg, title, sb.ToString().TrimEnd());
     }
+
+    /// <summary>
+    /// 告警推送（过了签到时间仍未签 / 部分失败）：不受「签到完成后推送」总开关约束，
+    /// 只受各渠道自己的开关约束。没有任何渠道启用时返回空列表，由调用方用界面/托盘兜底。
+    /// </summary>
+    public static Task<IReadOnlyList<ChannelOutcome>> SendAlertAsync(AppConfig? cfg, string title, string content)
+        => cfg == null ? Task.FromResult<IReadOnlyList<ChannelOutcome>>(Array.Empty<ChannelOutcome>())
+                       : SendAsync(cfg, title, content);
 
     /// <summary>把渠道结果汇总成一行人类可读文案（用于设置页状态条）。</summary>
     public static string Summarize(IReadOnlyList<ChannelOutcome> outcomes)

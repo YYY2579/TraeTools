@@ -39,6 +39,21 @@ sealed class Program
             Environment.Exit(RunNetSelftest());
             return;
         }
+        if (Array.Exists(args, a => a == "--log-selftest"))
+        {
+            Environment.Exit(RunLogSelftest());
+            return;
+        }
+        if (Array.Exists(args, a => a == "--diagnose-selftest"))
+        {
+            Environment.Exit(RunDiagnoseSelftest());
+            return;
+        }
+        if (Array.Exists(args, a => a == "--notify-selftest"))
+        {
+            Environment.Exit(RunNotifySelftest());
+            return;
+        }
         if (Array.Exists(args, a => a == "--update-swap-selftest"))
         {
             Environment.Exit(RunUpdateSwapSelftest());
@@ -217,6 +232,177 @@ sealed class Program
         if (trae == NetProbeResult.TlsFailure) ok = false;
 
         Console.WriteLine(ok ? "NET SELFTEST: PASS" : "NET SELFTEST: FAIL");
+        return ok ? 0 : 1;
+    }
+
+    /// <summary>
+    /// 云端失败原因归类自检：用 checkin.py 真实会打印的几种日志片段，验证归类映射正确。
+    /// 纯离线，不访问网络。
+    /// </summary>
+    private static int RunDiagnoseSelftest()
+    {
+        (string Sample, string Expect)[] cases =
+        [
+            ("Traceback...\nRuntimeError: 账号会话已失效(HTTP 401)：X-Cloudide-Session 可能已过期(~14天有效期)。", "session"),
+            ("错误：缺少环境变量 TRAE_SESSION", "secret"),
+            ("[用户A] 命中风控 9074，换新设备号重试（第 2 次）", "risk"),
+            ("github request failed: HTTP 403 rate limit exceeded", "github"),
+            ("[用户B] 签到失败：code=500 服务异常", "account"),
+            ("something completely unknown happened", "unknown"),
+        ];
+
+        bool ok = true;
+        foreach (var (sample, expect) in cases)
+        {
+            var d = TraeCheckin.GitHubApiClient.Classify(sample);
+            bool pass = d.Key == expect;
+            ok &= pass;
+            Console.WriteLine($"{(pass ? "OK  " : "FAIL")} [{d.Key}] 期望 {expect}");
+            Console.WriteLine($"      原因：{d.Reason}");
+            Console.WriteLine($"      建议：{d.Suggestion}");
+        }
+
+        Console.WriteLine(ok ? "DIAGNOSE SELFTEST: PASS" : "DIAGNOSE SELFTEST: FAIL");
+        return ok ? 0 : 1;
+    }
+
+    /// <summary>
+    /// 推送渠道自检：用环境变量里的 SMTP 配置真实发一封告警邮件，并把「实际发出的内容」打印出来。
+    ///
+    /// 凭据只从环境变量读取，**不落盘、不进仓库**（日志里也会做邮箱打码）。
+    /// 需要：TTSMTP_HOST / TTSMTP_PORT / TTSMTP_SEC / TTSMTP_USER / TTSMTP_PASS / TTSMTP_TO
+    /// </summary>
+    private static int RunNotifySelftest()
+    {
+        string host = Environment.GetEnvironmentVariable("TTSMTP_HOST") ?? "";
+        string portRaw = Environment.GetEnvironmentVariable("TTSMTP_PORT") ?? "465";
+        string sec = Environment.GetEnvironmentVariable("TTSMTP_SEC") ?? "ssl";
+        string user = Environment.GetEnvironmentVariable("TTSMTP_USER") ?? "";
+        string pass = Environment.GetEnvironmentVariable("TTSMTP_PASS") ?? "";
+        string to = Environment.GetEnvironmentVariable("TTSMTP_TO") ?? "";
+
+        if (string.IsNullOrEmpty(host) || string.IsNullOrEmpty(user) || string.IsNullOrEmpty(pass) || string.IsNullOrEmpty(to))
+        {
+            Console.WriteLine("FAIL: 缺少环境变量 TTSMTP_HOST / TTSMTP_USER / TTSMTP_PASS / TTSMTP_TO");
+            return 1;
+        }
+        int port = int.TryParse(portRaw, out var p) ? p : 465;
+
+        // 与线上真实告警同格式的内容（签到时间已过 10 分钟仍未签）
+        string title = "Trae 今日签到部分失败（1/3 个账号未签）";
+        string body = string.Join(Environment.NewLine, new[]
+        {
+            $"自动签到时间：08:00，已过 10 分钟仍未完成。",
+            $"当前进度：2/3 已签",
+            "✅ 用户38167781120  已签到",
+            "✅ 用户3782480143  已签到",
+            "⚠️ 用户8528184254  未签到",
+            "",
+            "可能原因与处理：",
+            "· 云端定时任务失败（最常见是 Session 过期）→ 「云端签到」页重新登录 Trae 后重新部署",
+            "· 本机当时没开机 / 程序没运行 → 打开程序点「一键签到」补签",
+            "· 命中风控 9074（参与用户太多）→ 错开整点时段，或换发设备号后重试",
+            "",
+            "（这是 TraeTools 的推送自检邮件，收到即说明邮件渠道可用）",
+        });
+
+        Console.WriteLine("=== 通知标题 ===");
+        Console.WriteLine(title);
+        Console.WriteLine("=== 通知正文（邮件正文原样） ===");
+        Console.WriteLine(body);
+        Console.WriteLine("=== 发送 ===");
+
+        // 用内存配置，不写 config.json —— 凭据不落盘
+        var cfg = new TraeCheckin.AppConfig
+        {
+            EmailEnabled = true,
+            SmtpHost = host,
+            SmtpPort = port,
+            SmtpSecurity = sec,
+            SmtpUser = user,
+            SmtpPassword = pass,
+            SmtpFrom = user,
+            SmtpTo = to,
+            NotifySystemEnabled = false,
+        };
+
+        var outcomes = TraeTools.Services.Notify.NotifyDispatcher
+            .SendAsync(cfg, title, body).GetAwaiter().GetResult();
+
+        bool ok = false;
+        foreach (var o in outcomes)
+        {
+            Console.WriteLine($"[{o.Channel}] {(o.Ok ? "OK" : "FAIL")} - {o.Message}");
+            if (o.Ok) ok = true;
+        }
+        if (outcomes.Count == 0) Console.WriteLine("FAIL: 没有任何启用的渠道");
+
+        Console.WriteLine(ok ? "NOTIFY SELFTEST: PASS" : "NOTIFY SELFTEST: FAIL");
+        return ok ? 0 : 1;
+    }
+
+    /// <summary>
+    /// 日志链路自检：验证「业务写日志 → 内存缓冲（日志页「最近」）→ 分类文件落盘」三者一致，
+    /// 且当天日志回填不会产生重复行。这三个性质坏掉时表现就是「日志页永远空白」。
+    /// </summary>
+    private static int RunLogSelftest()
+    {
+        bool ok = true;
+        string marker = "log-selftest-" + Guid.NewGuid().ToString("N")[..8];
+        var logsDir = TraeTools.Services.DataPaths.LogsDir;
+        var file = Path.Combine(logsDir, $"selftest_log_{DateTime.Now:yyyyMM}.txt");
+
+        // 1) 业务侧入口（AccountHelpers.AppLog）必须进入内存缓冲
+        TraeTools.ViewModels.AccountHelpers.AppLog("selftest", "lab", marker);
+        var recent = TraeTools.Services.AppLog.Recent();
+        if (!recent.Any(e => e.Message == marker))
+        {
+            Console.WriteLine("FAIL 1: AccountHelpers.AppLog 未进入内存缓冲（日志页会永远空白）");
+            ok = false;
+        }
+        else Console.WriteLine($"OK 1: 内存缓冲可见（当前 {recent.Count} 条）");
+
+        // 2) 同一条日志必须落到分类文件，且带级别标签（与旧格式兼容解析）
+        if (!File.Exists(file) || !File.ReadAllText(file).Contains(marker))
+        {
+            Console.WriteLine($"FAIL 2: 未写入分类日志 {file}");
+            ok = false;
+        }
+        else
+        {
+            var line = File.ReadAllLines(file).FirstOrDefault(l => l.Contains(marker)) ?? "";
+            if (!line.Contains("[INFO]"))
+            {
+                Console.WriteLine($"FAIL 2b: 落盘行缺少级别标签：{line}");
+                ok = false;
+            }
+            else Console.WriteLine("OK 2: 分类日志已落盘且带级别标签");
+        }
+
+        // 3) 回填幂等：已写入的日志行不能被回填重复加入
+        TraeTools.Services.AppLog.SeedFromTodayFiles();
+        TraeTools.Services.AppLog.SeedFromTodayFiles();
+        int dup = TraeTools.Services.AppLog.Recent().Count(e => e.Message == marker);
+        if (dup != 1)
+        {
+            Console.WriteLine($"FAIL 3: 回填后本测试行出现 {dup} 次（应为 1）");
+            ok = false;
+        }
+        else Console.WriteLine($"OK 3: 回填幂等，无重复行（共 {TraeTools.Services.AppLog.Recent().Count} 条）");
+
+        // 清理本测试产生的行，避免污染真实日志
+        try
+        {
+            if (File.Exists(file))
+            {
+                var kept = File.ReadAllLines(file).Where(l => !l.Contains(marker)).ToArray();
+                File.WriteAllLines(file, kept);
+                if (kept.Length == 0) File.Delete(file);
+            }
+        }
+        catch { /* 清理失败无害 */ }
+
+        Console.WriteLine(ok ? "LOG SELFTEST: PASS" : "LOG SELFTEST: FAIL");
         return ok ? 0 : 1;
     }
 

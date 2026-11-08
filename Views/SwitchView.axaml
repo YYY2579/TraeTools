@@ -38,33 +38,39 @@
                 </StackPanel>
             </Grid>
 
-            <!-- ===== Info Bar ===== -->
+            <!-- ===== Info Bar（两行布局：上行三条路径等宽，下行操作按钮独立成行，避免长路径压到相邻列）===== -->
             <Border Classes="panel">
-                <Grid ColumnDefinitions="*,*,*,*" RowDefinitions="Auto,Auto">
-                    <StackPanel Grid.Row="0" Grid.Column="0" Spacing="2">
-                        <TextBlock Text="用户目录" FontSize="11" Foreground="{DynamicResource TextSubBrush}" />
-                        <TextBlock Text="{Binding UserDirectory}" FontSize="12" Foreground="{DynamicResource TextMainBrush}" FontFamily="Consolas" TextTrimming="CharacterEllipsis" MaxWidth="180" ToolTip.Tip="{Binding UserDirectory}" />
+                <StackPanel Spacing="12">
+                    <Grid ColumnDefinitions="*,*,*" ColumnSpacing="14">
+                        <StackPanel Grid.Column="0" Spacing="3">
+                            <TextBlock Text="用户目录" FontSize="11" Foreground="{DynamicResource TextSubBrush}" />
+                            <TextBlock Text="{Binding UserDirectory}" FontSize="12" Foreground="{DynamicResource TextMainBrush}"
+                                       FontFamily="Consolas" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding UserDirectory}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="3">
+                            <TextBlock Text="客户端路径" FontSize="11" Foreground="{DynamicResource TextSubBrush}" />
+                            <TextBlock Text="{Binding ClientExePath}" FontSize="12" Foreground="{DynamicResource TextMainBrush}"
+                                       FontFamily="Consolas" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ClientExePath}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="3">
+                            <TextBlock Text="vault 路径" FontSize="11" Foreground="{DynamicResource TextSubBrush}" />
+                            <TextBlock Text="{Binding VaultPath}" FontSize="12" Foreground="{DynamicResource TextMainBrush}"
+                                       FontFamily="Consolas" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding VaultPath}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- 操作行：按钮不再与标题抢位 -->
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Classes="btn" Content="选择客户端程序" FontSize="11" Padding="10,4" Command="{Binding BrowseClientExeCommand}" />
+                        <Button Classes="btn" Content="重新探测" FontSize="11" Padding="10,4" Command="{Binding ReDetectClientExeCommand}" />
+                        <Button Classes="btn" Content="打开客户端目录" FontSize="11" Padding="10,4" Command="{Binding OpenClientDirCommand}" />
+                        <Button Classes="btn" Content="打开数据目录" FontSize="11" Padding="10,4" Command="{Binding OpenDataDirCommand}" />
+                        <Button Classes="btn" Content="打开 vault 目录" FontSize="11" Padding="10,4" Command="{Binding OpenVaultDirCommand}" />
                     </StackPanel>
-                    <StackPanel Grid.Row="0" Grid.Column="1" Spacing="2">
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                            <TextBlock Grid.Column="0" Text="客户端路径" FontSize="11" Foreground="{DynamicResource TextSubBrush}" />
-                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                                <Button Classes="btn" Content="选择文件" FontSize="11" Padding="8,3" Command="{Binding BrowseClientExeCommand}" />
-                                <Button Classes="btn" Content="重新探测" FontSize="11" Padding="8,3" Command="{Binding ReDetectClientExeCommand}" />
-                            </StackPanel>
-                        </Grid>
-                        <TextBlock Text="{Binding ClientExePath}" FontSize="12" Foreground="{DynamicResource TextMainBrush}" FontFamily="Consolas" TextTrimming="CharacterEllipsis" MaxWidth="300" ToolTip.Tip="{Binding ClientExePath}" />
-                        <TextBlock Text="自动探测失败或想指定其他版本时，可手动选择客户端程序或重新探测" FontSize="10" Foreground="{DynamicResource TextMutedBrush}" TextWrapping="Wrap" MaxWidth="300" />
-                    </StackPanel>
-                    <StackPanel Grid.Row="0" Grid.Column="2" Spacing="2">
-                        <TextBlock Text="载体指纹数" FontSize="11" Foreground="{DynamicResource TextSubBrush}" />
-                        <TextBlock Text="{Binding CarrierCount}" FontSize="12" Foreground="{DynamicResource TextMainBrush}" />
-                    </StackPanel>
-                    <StackPanel Grid.Row="0" Grid.Column="3" Spacing="2">
-                        <TextBlock Text="vault 路径" FontSize="11" Foreground="{DynamicResource TextSubBrush}" />
-                        <TextBlock Text="{Binding VaultPath}" FontSize="12" Foreground="{DynamicResource TextMainBrush}" FontFamily="Consolas" TextTrimming="CharacterEllipsis" MaxWidth="180" ToolTip.Tip="{Binding VaultPath}" />
-                    </StackPanel>
-                </Grid>
+
+                    <TextBlock Text="自动探测失败或想指定其他版本时可手动选择客户端程序；数据目录存放 config.json、签到数据库与日志。"
+                               FontSize="10" Foreground="{DynamicResource TextMutedBrush}" TextWrapping="Wrap" />
+                </StackPanel>
             </Border>
 
             <!-- ===== Account List + Guardian Panel ===== -->
@@ -74,7 +80,12 @@
                     <Grid RowDefinitions="Auto,*,Auto" MinHeight="340">
                         <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
                             <TextBlock Grid.Column="0" Text="账号列表" Classes="card-title" />
-                            <TextBlock Grid.Column="1" Text="{Binding AccountCountText}" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding AccountCountText}" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                                <TextBlock Text="·" FontSize="11" Foreground="{DynamicResource TextSubBrush}" />
+                                <TextBlock Text="{Binding CarrierCount}" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                                <TextBlock Text="载体" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                            </StackPanel>
                         </Grid>
 
                         <!-- ListBox：支持点击选中（SelectedItem 双向绑定） -->

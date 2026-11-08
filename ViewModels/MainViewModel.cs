@@ -259,6 +259,40 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>由 MainWindow 定时器定时调用：到点自动签到（TraeCheckin「每日自动签到」能力）。</summary>
     public Task<bool> AutoCheckinIfDue() => _checkin.TryAutoCheckinAsync();
 
+    /// <summary>
+    /// 由 MainWindow 定时器与启动流程调用：过了「签到时间 + 10 分钟」仍有账号未签 → 告警。
+    /// 云端定时任务失败、本机没开机、自动签到被风控拦下，最终都会落到这个判据上。
+    /// </summary>
+    public Task<bool> CheckMissedCheckinIfDue() => _checkin.CheckMissedCheckinAsync();
+
+    /// <summary>到点未签告警事件（MainWindow 订阅后弹托盘通知 + 写界面日志，兜底无推送渠道的情况）。</summary>
+    public static event Action<string, string>? MissedAlertRaised;
+
+    /// <summary>触发告警事件（异常不影响告警主流程，推送已经先行发出）。</summary>
+    public static void RaiseMissedAlert(string title, string content)
+    {
+        try { MissedAlertRaised?.Invoke(title, content); }
+        catch { /* 界面提示失败不影响已发出的推送 */ }
+    }
+
+    /// <summary>
+    /// 仪表盘「一键签到」入口：与「每日签到」页共用同一条批量路径与同一份账号勾选
+    /// （勾选真源是 TraeAccount.Enabled），不做第二套选择逻辑。
+    /// </summary>
+    public Task<(bool Any, int Ok, int Total, double Gained, string Summary)> RunBatchCheckinAsync()
+        => _checkin.RunBatchCheckinAsync();
+
+    /// <summary>勾选（Enabled）账号数 / 今日未签的已勾选账号数，供仪表盘按钮文案与可用性判断。</summary>
+    public (int Checked, int Pending, int IntervalSeconds) BatchCheckinScope()
+    {
+        var cfg = AppConfig;
+        if (cfg == null) return (0, 0, 5);
+        var checkedAccs = cfg.Accounts.Where(a => a.Enabled).ToList();
+        int pending = checkedAccs.Count(a => !(a.LastCheckinDate.HasValue && a.LastCheckinDate.Value.Date == DateTime.Today));
+        int interval = cfg.CheckinIntervalSeconds > 0 ? cfg.CheckinIntervalSeconds : 5;
+        return (checkedAccs.Count, pending, interval);
+    }
+
     /// <summary>由 MainWindow 定时器定时调用：客户端已退出时静默刷新当前账号的 vault 备份（本次运行只刷一次）。</summary>
     public Task RefreshSnapshotIfNeeded() => _switch.TryAutoRefreshSnapshotAsync();
 

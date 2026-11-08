@@ -4,10 +4,13 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Avalonia;
+using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using TraeCheckin;
 using TraeTools.Models;
+using TraeTools.Services.Notify;
 using TraeTools.Views;
 
 namespace TraeTools.ViewModels;
@@ -43,6 +46,14 @@ public partial class CheckinViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _progressText = $"0/{DateTime.DaysInMonth(DateTime.Today.Year, DateTime.Today.Month)}";
+
+    /// <summary>连签圆环弧线（按本月签到进度绘制，分母 = 当月实际天数）。</summary>
+    [ObservableProperty]
+    private Geometry _streakRingGeometry = new StreamGeometry();
+
+    /// <summary>圆环下方小字（本月 N/当月天数）。</summary>
+    [ObservableProperty]
+    private string _streakRingCaption = $"本月 0/{DateTime.DaysInMonth(DateTime.Today.Year, DateTime.Today.Month)}";
 
     [ObservableProperty]
     private string _statusMessage = "";
@@ -156,14 +167,24 @@ public partial class CheckinViewModel : ViewModelBase
         return signed;
     }
 
-    /// <summary>重建本月签到日历：今天=today，历史/配置中有记录的=checked，其余=empty。</summary>
+    /// <summary>本月日历是按哪一年哪一月构建的（用于跨月检测，程序常驻托盘时自动重建）。</summary>
+    private (int Year, int Month) _builtFor;
+
+    /// <summary>
+    /// 重建本月签到日历：今天=today，历史/配置中有记录的=checked，
+    /// 本月内早于今天且未签到、且已过「统计起点」的=missed，其余=empty。
+    /// </summary>
     private void ReloadCalendar()
     {
         CalendarDays.Clear();
         try
         {
+            var today = DateTime.Today;
+            _builtFor = (today.Year, today.Month);
+            MonthTitle = $"{today.Year} 年 {today.Month} 月";
+
             // 月首工作日偏移补位（周标头：日一...六；Sunday=0..Saturday=6），保证每月1号对齐正确星期列
-            var first = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+            var first = new DateTime(today.Year, today.Month, 1);
             for (int i = 0; i < (int)first.DayOfWeek; i++)
                 CalendarDays.Add(new CalendarDay { Day = 0, State = "blank" });
 
@@ -186,26 +207,40 @@ public partial class CheckinViewModel : ViewModelBase
             }
             catch { /* 悬浮数据失败不影响日历 */ }
 
-            int days = DateTime.DaysInMonth(DateTime.Today.Year, DateTime.Today.Month);
+            int days = DateTime.DaysInMonth(today.Year, today.Month);
+
+            // 「漏签」统计起点：本月 1 号与「最早一次签到」取较晚者。
+            // 一条记录都没有时退到 7 天前，避免首次使用就满屏飘红（那不是漏签，是还没开始用）。
+            var earliestSigned = signed.Count > 0 ? signed.Min() : today.AddDays(-7);
+            var statStart = earliestSigned > first ? earliestSigned : first;
+            if (statStart > today) statStart = today;   // 防御：未来日期不参与判定
+
             for (int day = 1; day <= days; day++)
             {
-                var d = new DateTime(DateTime.Today.Year, DateTime.Today.Month, day);
+                var d = new DateTime(today.Year, today.Month, day);
                 string state;
-                if (signed.Contains(d.Date)) state = "checked";          // 已签（含今日已签）→ 蓝色
-                else if (d.Date == DateTime.Today) state = "today";      // 今天未签 → 今日高亮
-                else state = "empty";
+                if (signed.Contains(d.Date)) state = "checked";                 // 已签（含今日已签）→ 蓝色
+                else if (d.Date == today) state = "today";                       // 今天未签 → 今日高亮
+                else if (d.Date < today && d.Date >= statStart) state = "missed"; // 本月应签未签 → 红色
+                else state = "empty";                                            // 未开始统计/未来日期 → 灰白
                 var item = new CalendarDay { Day = day, State = state, Date = d };
                 if (byDate.TryGetValue(d.Date, out var list) && list.Count > 0)
                     item.ToolTipText = $"{d:yyyy-MM-dd}\n" + string.Join("\n", list);
                 else
-                    item.ToolTipText = signed.Contains(d.Date) ? $"{d:yyyy-MM-dd}\n已签到" : $"{d:yyyy-MM-dd}\n未签到";
+                    item.ToolTipText = state switch
+                    {
+                        "checked" => $"{d:yyyy-MM-dd}\n已签到",
+                        "missed" => $"{d:yyyy-MM-dd}\n漏签（未签到）",
+                        "today" => $"{d:yyyy-MM-dd}\n今日尚未签到",
+                        _ => $"{d:yyyy-MM-dd}\n未签到",
+                    };
                 CalendarDays.Add(item);
             }
 
             // 连签天数：从今天（或昨天）向前连续计数
             var signedDates = signed;
             int streak = 0;
-            var cursor = DateTime.Today;
+            var cursor = today;
             if (!signedDates.Contains(cursor.Date)) cursor = cursor.AddDays(-1);
             while (signedDates.Contains(cursor.Date))
             {
@@ -214,13 +249,60 @@ public partial class CheckinViewModel : ViewModelBase
             }
             StreakDays = streak;
 
-            // 月进度
-            int signedCount = signedDates.Count(d => d.Year == DateTime.Today.Year && d.Month == DateTime.Today.Month);
+            // 月进度（分母 = 当月实际天数 28/29/30/31）
+            int signedCount = signedDates.Count(d => d.Year == today.Year && d.Month == today.Month);
             ProgressText = $"{signedCount}/{days}";
             ProgressRatio = days > 0 ? (double)signedCount / days : 0;
+            RebuildRing();   // 圆环跟着本月进度走
         }
         catch { /* 失败保持空日历 */ }
     }
+
+    /// <summary>
+    /// 重建连签圆环：弧长 = 本月签到进度，分母是**当月实际天数**（28/29/30/31，闰年 2 月 29）。
+    /// 原实现是写死的静态弧（M 48,12 A 36,36 …），连签 1 天和 20 天长同一个样。
+    /// </summary>
+    private void RebuildRing()
+    {
+        const double cx = 48, cy = 48, r = 36;
+        const double startAngle = -90;   // 12 点方向起画，顺时针
+        var geo = new StreamGeometry();
+        try
+        {
+            double ratio = Math.Clamp(ProgressRatio, 0, 1);
+            double sweep = 360 * ratio;
+            if (sweep > 0.5)   // 0 天时连一丝弧都不留
+            {
+                using var ctx = geo.Open();
+                ctx.BeginFigure(PointOnCircle(cx, cy, r, startAngle), false);
+                ctx.ArcTo(PointOnCircle(cx, cy, r, startAngle + sweep),
+                          new Size(r, r), 0, sweep > 180, SweepDirection.Clockwise);
+                ctx.EndFigure(false);
+            }
+        }
+        catch { /* 几何构建失败不影响页面 */ }
+        StreakRingGeometry = geo;
+        StreakRingCaption = $"本月 {ProgressText}";
+    }
+
+    private static Point PointOnCircle(double cx, double cy, double r, double deg)
+    {
+        double rad = deg * Math.PI / 180.0;
+        return new Point(cx + r * Math.Cos(rad), cy + r * Math.Sin(rad));
+    }
+
+    /// <summary>
+    /// 跨月检查：月份变了就重建日历与圆环。
+    /// 常驻托盘的程序跨月后若不重建，日历会停在旧月份、进度分母还是旧月天数（28/30/31 各不相同）。
+    /// </summary>
+    public void EnsureCurrentMonth()
+    {
+        var today = DateTime.Today;
+        if (_builtFor == (today.Year, today.Month)) return;
+        ReloadCalendar();
+    }
+
+    partial void OnProgressRatioChanged(double value) => RebuildRing();
 
     /// <summary>读取签到历史列表（优先 SQLite，回退文本文件；无数据时用示例）。</summary>
     private void LoadHistory()
@@ -538,6 +620,75 @@ public partial class CheckinViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// 到点告警：过了「自动签到时间 + 10 分钟」还有已勾选账号没签上，就认为这次签到失败并告警。
+    ///
+    /// 为什么用这个判据而不是去查 GitHub Actions：云端签到成功与否，最终都体现在
+    /// 「本地账号今天有没有签到记录」上；而查 Actions 需要网络+日志下载，还要求用户配了 GitHub。
+    /// 时间窗 + 签到状态是唯一同时覆盖「本地没跑」「云端定时任务失败」两种情况的判据。
+    /// 每天只告警一次（日期落盘，重启程序也不重复）。
+    /// </summary>
+    public async Task<bool> CheckMissedCheckinAsync()
+    {
+        try
+        {
+            var cfg = MainViewModel.AppConfig;
+            if (cfg == null || !cfg.AutoCheckinEnabled) return false;
+            if (!TimeSpan.TryParse(cfg.AutoCheckinTime, out var due)) return false;
+
+            // 宽限期：到点后再等 10 分钟，给自动签到本身留出执行时间
+            if (DateTime.Now.TimeOfDay < due + TimeSpan.FromMinutes(MissedGraceMinutes)) return false;
+            if (cfg.LastMissedAlertDate?.Date == DateTime.Today) return false;
+
+            var checkedAccs = cfg.Accounts.Where(a => a.Enabled).ToList();
+            if (checkedAccs.Count == 0) return false;
+
+            static bool Signed(TraeCheckin.TraeAccount a)
+                => a.LastCheckinDate.HasValue && a.LastCheckinDate.Value.Date == DateTime.Today;
+
+            var pending = checkedAccs.Where(a => !Signed(a)).ToList();
+            if (pending.Count == 0) return false;
+
+            cfg.LastMissedAlertDate = DateTime.Now;
+            try { cfg.Save(); } catch { /* 落盘失败不阻断告警 */ }
+
+            static string Name(TraeCheckin.TraeAccount a)
+                => string.IsNullOrEmpty(a.Name) ? (a.Id.Length > 6 ? a.Id[..6] : a.Id) : a.Name!;
+
+            bool allMissed = pending.Count == checkedAccs.Count;
+            string title = allMissed
+                ? $"Trae 今日签到未完成（{checkedAccs.Count} 个账号全部未签）"
+                : $"Trae 今日签到部分失败（{pending.Count}/{checkedAccs.Count} 个账号未签）";
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"自动签到时间：{cfg.AutoCheckinTime}，已过 {MissedGraceMinutes} 分钟仍未完成。");
+            sb.AppendLine($"当前进度：{checkedAccs.Count - pending.Count}/{checkedAccs.Count} 已签");
+            foreach (var a in checkedAccs)
+                sb.AppendLine((Signed(a) ? "✅ " : "⚠️ ") + Name(a) + (Signed(a) ? "  已签到" : "  未签到"));
+            sb.AppendLine();
+            sb.AppendLine("可能原因与处理：");
+            sb.AppendLine("· 云端定时任务失败（最常见是 Session 过期）→ 「云端签到」页重新登录 Trae 后重新部署");
+            sb.AppendLine("· 本机当时没开机 / 程序没运行 → 打开程序点「一键签到」补签");
+            sb.AppendLine("· 命中风控 9074（参与用户太多）→ 错开整点时段，或换发设备号后重试");
+            var content = sb.ToString().TrimEnd();
+
+            AccountHelpers.CheckinLog("", $"[到点未签告警] {title}");
+            StatusMessage = title;
+            await NotifyDispatcher.SendAlertAsync(cfg, title, content);
+
+            // 界面兜底：即使没配任何推送渠道，本机也要弹一条，并写入日志页
+            MainViewModel.RaiseMissedAlert(title, content);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>到点未签的宽限期（分钟）。</summary>
+    private const int MissedGraceMinutes = 10;
+
     /// <summary>自动签到上次已触发日期（每日仅触发一次）。</summary>
     private static DateTime _lastAutoCheckDate = DateTime.MinValue;
 
@@ -616,11 +767,18 @@ public partial class CheckinViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 一键签到（对齐 TraeCheckin.DoCheckinAsync）：为全部 Enabled 账号签到。
+    /// 一键签到（对齐 TraeCheckin.DoCheckinAsync）：为全部 Enabled（= 勾选）账号签到。
     /// 存在未登录账号时先弹登录窗；完成后汇总文案与飞书推送，并同步仪表盘/账号状态。
     /// </summary>
     [RelayCommand]
-    private async Task DoCheckin()
+    private Task DoCheckin() => RunBatchCheckinAsync();
+
+    /// <summary>
+    /// 批量签到的可复用入口（签到页「一键签到」与仪表盘「一键签到」共用同一条路径、同一份勾选）。
+    /// 勾选真源是 <see cref="TraeAccount.Enabled"/>（签到页勾选框双向同步），因此两处行为必然一致。
+    /// 返回 (是否有成功, 成功数, 总数, 总积分, 摘要文案)。
+    /// </summary>
+    public async Task<(bool Any, int Ok, int Total, double Gained, string Summary)> RunBatchCheckinAsync()
     {
         try
         {
@@ -628,13 +786,13 @@ public partial class CheckinViewModel : ViewModelBase
             if (cfg == null || MainViewModel.CheckinApi == null)
             {
                 StatusMessage = "服务未初始化";
-                return;
+                return (false, 0, 0, 0, StatusMessage);
             }
             RebuildCheckList();   // 勾选与账号保持同步（含刚添加的账号）
             if (cfg.Accounts.Count == 0)
             {
                 StatusMessage = "没有可用账号，请先在「设置」中添加";
-                return;
+                return (false, 0, 0, 0, StatusMessage);
             }
 
             // 存在未登录账号：先弹登录窗（对齐源：登录取消则中止，登录成功继续）
@@ -646,7 +804,7 @@ public partial class CheckinViewModel : ViewModelBase
                 if (!logged)
                 {
                     StatusMessage = "已取消登录";
-                    return;
+                    return (false, 0, 0, 0, StatusMessage);
                 }
                 StatusMessage = "登录成功，正在为所有启用账号签到…";
             }
@@ -667,10 +825,12 @@ public partial class CheckinViewModel : ViewModelBase
             LoadHistory();
             if (results.Count > 0) await NotifyFeishuBatchAsync(results);
             if (any) await MainViewModel.NotifyAsyncRefresh();
+            return (any, ok, results.Count, total, summary);
         }
         catch (Exception ex)
         {
             StatusMessage = $"签到异常：{ex.Message}";
+            return (false, 0, 0, 0, StatusMessage);
         }
     }
 }

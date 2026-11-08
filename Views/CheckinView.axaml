@@ -44,39 +44,38 @@
                 </StackPanel>
             </Border>
 
-            <!-- ===== Hero Card ===== -->
-            <Border Grid.Row="2" CornerRadius="14" Padding="22,16" Margin="0,14,0,0">
-                <Border.Background>
-                    <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
-                        <GradientStop Color="#FF1E293B" Offset="0" />
-                        <GradientStop Color="#FF334155" Offset="1" />
-                    </LinearGradientBrush>
-                </Border.Background>
+            <!-- ===== Hero Card（跟随主题：浅色淡蓝底+深字，深色深蓝底+浅字；不再写死黑底）===== -->
+            <Border Grid.Row="2" CornerRadius="14" Padding="22,16" Margin="0,14,0,0"
+                    Background="{DynamicResource HeroTintBgBrush}"
+                    BorderBrush="{DynamicResource BorderBrushKey}" BorderThickness="1">
                 <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
-                    <TextBlock Text="今日奖励" Foreground="#94A3B8" FontSize="12" />
+                    <TextBlock Text="今日奖励" Foreground="{DynamicResource HeroTintSubBrush}" FontSize="12" />
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <TextBlock Text="{Binding TodayReward}" Foreground="White" FontSize="26" FontWeight="Bold" />
-                        <TextBlock Text="积分" Foreground="#94A3B8" FontSize="13" VerticalAlignment="Bottom" Margin="0,0,0,5" />
+                        <TextBlock Text="{Binding TodayReward}" Foreground="{DynamicResource TextMainBrush}" FontSize="26" FontWeight="Bold" />
+                        <TextBlock Text="积分" Foreground="{DynamicResource HeroTintSubBrush}" FontSize="13" VerticalAlignment="Bottom" Margin="0,0,0,5" />
                     </StackPanel>
                     <!-- 会员徽章 + 签到结果/今日已签 状态，合并到同一行居中展示 -->
                     <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
                                 IsVisible="{Binding HasStatusMessage}">
-                        <Border Background="#22FFFFFF" CornerRadius="999" Padding="8,2" HorizontalAlignment="Left">
-                            <TextBlock Text="{Binding MemberHint}" Foreground="#CBD5E1" FontSize="11" />
+                        <Border Background="{DynamicResource AccentSoftBrush}" CornerRadius="999" Padding="8,2" HorizontalAlignment="Left">
+                            <TextBlock Text="{Binding MemberHint}" Foreground="{DynamicResource AccentBrush}" FontSize="11" />
                         </Border>
-                        <TextBlock Text="{Binding StatusMessage}" FontSize="11" Foreground="#FF93C5FD"
+                        <TextBlock Text="{Binding StatusMessage}" FontSize="11" Foreground="{DynamicResource AccentBrush}"
                                    TextWrapping="Wrap" VerticalAlignment="Center" />
                     </StackPanel>
                 </StackPanel>
 
-                    <!-- Streak Progress Ring：圆环减小，与紧凑布局匹配 -->
+                    <!-- 本月签到进度环：弧长由 StreakRingGeometry 按当月天数计算（28/29/30/31） -->
                     <Canvas Grid.Column="1" Width="96" Height="96" HorizontalAlignment="Right" VerticalAlignment="Center">
-                        <Ellipse Canvas.Left="12" Canvas.Top="12" Width="72" Height="72" Stroke="#33FFFFFF" StrokeThickness="7" />
-                        <Path Data="M 48,12 A 36,36 0 1 1 13.1,45.6" Stroke="White" StrokeThickness="7" StrokeLineCap="Round" />
-                        <StackPanel Canvas.Left="12" Canvas.Top="34" Width="72">
-                            <TextBlock Text="{Binding StreakDays}" Foreground="White" FontSize="19" FontWeight="Bold" HorizontalAlignment="Center" />
-                            <TextBlock Text="连续天数" Foreground="#94A3B8" FontSize="10" HorizontalAlignment="Center" />
+                        <Ellipse Canvas.Left="12" Canvas.Top="12" Width="72" Height="72"
+                                 Stroke="{DynamicResource RingTrackBrush}" StrokeThickness="7" />
+                        <Path Data="{Binding StreakRingGeometry}" Stroke="{DynamicResource AccentBrush}"
+                              StrokeThickness="7" StrokeLineCap="Round" />
+                        <StackPanel Canvas.Left="12" Canvas.Top="30" Width="72" Spacing="1">
+                            <TextBlock Text="{Binding StreakDays}" Foreground="{DynamicResource TextMainBrush}" FontSize="19" FontWeight="Bold" HorizontalAlignment="Center" />
+                            <TextBlock Text="连续天数" Foreground="{DynamicResource HeroTintSubBrush}" FontSize="10" HorizontalAlignment="Center" />
+                            <TextBlock Text="{Binding StreakRingCaption}" Foreground="{DynamicResource HeroTintSubBrush}" FontSize="9" HorizontalAlignment="Center" />
                         </StackPanel>
                     </Canvas>
                 </Grid>
@@ -122,13 +121,13 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                        <StackPanel Orientation="Horizontal" Spacing="14" Margin="0,8,0,0">
+                        <StackPanel Orientation="Horizontal" Spacing="14" Margin="0,8,0,0" VerticalAlignment="Center">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <Border Width="12" Height="12" CornerRadius="3" Background="{DynamicResource AccentBrush}" />
                                 <TextBlock Text="已签" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <Border Width="12" Height="12" CornerRadius="3" Background="White" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="2" />
+                                <Border Width="12" Height="12" CornerRadius="3" Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="2" />
                                 <TextBlock Text="今日" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Spacing="6">
@@ -136,10 +135,12 @@
                                 <TextBlock Text="漏签" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <Border Width="12" Height="12" CornerRadius="3" Background="#FFF1F5F9" />
+                                <Border Width="12" Height="12" CornerRadius="3" Background="{DynamicResource RowBgBrush}" />
                                 <TextBlock Text="未签" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
                             </StackPanel>
                         </StackPanel>
+                        <TextBlock Text="漏签 = 本月内早于今天、且已过首次签到日的未签到日期；首次签到之前的空档不算漏签。"
+                                   FontSize="10" Foreground="{DynamicResource TextSubBrush}" TextWrapping="Wrap" Margin="0,6,0,0" />
                         </StackPanel>
                         </ScrollViewer>
                     </Grid>

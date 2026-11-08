@@ -76,8 +76,9 @@
                     <Button Classes="btn" Content="刷新状态" Command="{Binding RefreshStatusCommand}" />
                     <Button Classes="btn-danger" Content="重新登录" Command="{Binding ReloginCommand}"
                         IsVisible="{Binding NeedLogin}" />
-                    <Button Classes="btn-primary" Content="立即签到" Command="{Binding QuickCheckinCommand}"
-                            IsEnabled="{Binding CanQuickCheckin}" />
+                    <Button Classes="btn-cta" Content="一键签到" Command="{Binding BatchCheckinCommand}"
+                            IsEnabled="{Binding CanQuickCheckin}"
+                            ToolTip.Tip="{Binding CheckinIntervalHint}" />
                 </StackPanel>
             </Grid>
 
@@ -98,6 +99,10 @@
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <TextBlock Text="{Binding CheckinStatus}" Classes="card-value" Foreground="{DynamicResource SuccessBrush}" />
                         </StackPanel>
+                        <!-- 一键签到结果汇总（勾选范围 / 成功数 / 累计积分 / 失败原因） -->
+                        <TextBlock Text="{Binding BatchSummary}" IsVisible="{Binding HasBatchSummary}"
+                                   FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextMutedBrush}" />
                     </StackPanel>
                 </Border>
                 <Border Grid.Column="2" Classes="card" Margin="10,0,0,0">
@@ -167,9 +172,11 @@
                                             <Border Width="{Binding StepWidth}" Height="200" Background="Transparent"
                                                     PointerEntered="TrendHoverEnter" PointerExited="TrendHoverExit">
                                                 <Canvas>
-                                                    <!-- 每个数据点一个可见圆点标记（相对 hit-area 原点居中，横坐标由外层 Canvas.Left 定位） -->
+                                                    <!-- 每个数据点一个可见圆点标记（相对 hit-area 原点居中，横坐标由外层 Canvas.Left 定位）
+                                                         插值点（当日无记录、按前值延续）用半透明区分 -->
                                                     <Ellipse Canvas.Left="0" Canvas.Top="{Binding Y}" Width="12" Height="12"
-                                                             Margin="-6,-6,0,0" Fill="White" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2.5" />
+                                                             Margin="-6,-6,0,0" Fill="White" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2.5"
+                                                             Opacity="{Binding MarkerOpacity}" />
                                                     <!-- 命中该点时竖直参考线 -->
                                                     <Border Width="1" Height="200" Background="#223B82F6" IsVisible="{Binding IsHovered}" HorizontalAlignment="Center" />
                                                 </Canvas>
@@ -186,11 +193,12 @@
                                 </Canvas>
                                 </Viewbox>
                             </Grid>
-                            <!-- Row 1: X axis date labels -->
-                            <ItemsControl Grid.Row="1" ItemsSource="{Binding XAxisLabels}" Margin="0,6,0,0" HorizontalAlignment="Stretch">
+                            <!-- Row 1: X axis date labels（列数随标签数自适应，勿再写死 Columns="8"；
+                                 固定 7 个标签由 VM 按槽位下标 0,2,4,6,8,10,13 生成，与折线拐点对齐） -->
+                            <ItemsControl Grid.Row="1" ItemsSource="{Binding XAxisLabels}" Margin="12,6,12,0" HorizontalAlignment="Stretch">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
-                                        <UniformGrid Rows="1" Columns="8" />
+                                        <UniformGrid Rows="1" />
                                     </ItemsPanelTemplate>
                                 </ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemTemplate>
@@ -225,9 +233,14 @@
                                                     </Rectangle>
                                                 </Grid>
                                                 <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Margin="10,0" />
-                                                <Border Grid.Column="2" Classes.badge-ok="{Binding IsCurrent}" Classes.badge-info="{Binding !IsCurrent}" VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding Status}" FontSize="11" />
-                                                </Border>
+                                                <StackPanel Grid.Column="2" Spacing="3" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding CreditsText}" FontSize="11" FontWeight="SemiBold"
+                                                               HorizontalAlignment="Right" Foreground="{DynamicResource WarningBrush}" />
+                                                    <Border Classes.badge-ok="{Binding IsCurrent}" Classes.badge-info="{Binding !IsCurrent}"
+                                                            HorizontalAlignment="Right">
+                                                        <TextBlock Text="{Binding Status}" FontSize="11" />
+                                                    </Border>
+                                                </StackPanel>
                                             </Grid>
                                         </Button>
                                     </Border>

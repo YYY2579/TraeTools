@@ -131,6 +131,8 @@ public partial class LogViewModel : ViewModelBase
         Files.CollectionChanged += (_, _) => OnPropertyChanged(nameof(IsFilesEmpty));
 
         Subscribe();
+        // 先回填当天已落盘的日志（进程重启后「最近」不再是空的）；幂等，只会执行一次
+        AppLog.SeedFromTodayFiles();
         ReloadRecent();
         RefreshFiles();
     }
@@ -184,6 +186,10 @@ public partial class LogViewModel : ViewModelBase
             // OnAutoScrollChanged 内部有相等判断，因此这里不会产生多余的落盘。
             try { AutoScroll = MainViewModel.AppConfig?.LogAutoScroll ?? AutoScroll; }
             catch { /* 读配置失败则保留当前值 */ }
+
+            // 每次进页面都尝试回填当天日志（SeedFromTodayFiles 内部幂等，二次调用直接返回）。
+            // 覆盖「启动时日志目录还没有文件、运行中才产生」的场景。
+            AppLog.SeedFromTodayFiles();
 
             Recent.Clear();
             foreach (var e in AppLog.Recent(MaxRecentRows)) Recent.Add(e);

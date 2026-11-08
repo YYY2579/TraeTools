@@ -94,7 +94,12 @@ public partial class LoginWindow : Window
             _account.Token = result.Token;
             // 关键保护：宿主没抓到 Session Cookie 时绝不能把已有的 Session 清掉
             // （Session 是 token 过期后唯一续命手段，旧代码这里会把好 Session 覆盖成 null）
-            _account.Session = result.Session ?? _account.Session;
+            // 只有真正拿到新 Session 才刷新签发时间，否则云端「凭证有效期」会被错误续命。
+            if (!string.IsNullOrEmpty(result.Session))
+            {
+                _account.Session = result.Session;
+                _account.SessionUpdatedAt = DateTime.Now;
+            }
             _account.TokenUpdatedAt = DateTime.Now;
             if (!string.IsNullOrEmpty(uid)) _account.AccountUid = uid;
             AccountHelpers.InvalidateTokenCache(_account.Id);   // 新登录态落盘后立即刷新校验缓存
@@ -328,7 +333,11 @@ public partial class LoginWindow : Window
                 }
                 _account.Token = token;
             }
-            if (!string.IsNullOrEmpty(session)) _account.Session = session;
+            if (!string.IsNullOrEmpty(session))
+            {
+                _account.Session = session;
+                _account.SessionUpdatedAt = DateTime.Now;
+            }
 
             if (!string.IsNullOrEmpty(deviceId)
                 && deviceId.Length == 16 && deviceId.All(char.IsDigit)

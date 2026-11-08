@@ -22,6 +22,12 @@ public class TraeAccount
     /// </summary>
     public string? AccountUid { get; set; }
     public DateTime? TokenUpdatedAt { get; set; }
+    /// <summary>
+    /// Session（X-Cloudide-Session）最近一次写入时间。
+    /// Session 约 14 天有效且**不会**因换取新 JWT 而续期，云端凭证过期判断以此为准
+    /// （旧配置无此字段时回退 TokenUpdatedAt 估算）。
+    /// </summary>
+    public DateTime? SessionUpdatedAt { get; set; }
     /// <summary>该账号最近一次本地签到日期。</summary>
     public DateTime? LastCheckinDate { get; set; }
     /// <summary>该账号最近一次刷新/签到的剩余积分；-1 表示尚未获取过（仪表盘回退用全局 LastRemaining）。</summary>

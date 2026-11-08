@@ -258,13 +258,25 @@ public static class AppLog
 
             lock (Sync)
             {
+                // 去重：本进程已写入的行同时存在于 Buffer 与文件里，
+                // 直接 AddLast 会让每次启动的日志翻倍。
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var e in Buffer) seen.Add(Key(e));
+
                 foreach (var e in lines.TakeLast(MaxMemoryEntries))
+                {
+                    if (!seen.Add(Key(e))) continue;   // 已在缓冲中 → 跳过
                     Buffer.AddLast(e);
+                }
                 while (Buffer.Count > MaxMemoryEntries) Buffer.RemoveFirst();
             }
         }
         catch { /* 回填失败不影响功能 */ }
     }
+
+    /// <summary>去重键：时间（秒级）+ 分类 + 账号 + 正文。</summary>
+    private static string Key(LogEntry e)
+        => $"{e.Time:yyyy-MM-dd HH:mm:ss}|{e.Category}|{e.Account}|{e.Message}";
 
     // ==================== 读取（全部文件） ====================
 

@@ -21,3 +21,6 @@ Thumbs.db
 publish/
 # ZCode local tool config
 .zcode/
+
+# 本地开发/修复计划文档：仅用于内部评审，不纳入版本库
+docs/修复计划-*.md

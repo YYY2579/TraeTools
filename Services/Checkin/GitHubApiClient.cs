@@ -52,6 +52,8 @@ public class PatValidation
 /// <summary>最近一次 workflow run 的简要信息（用于本地监控云端签到状态）。</summary>
 public class WorkflowRunInfo
 {
+    /// <summary>run id（拉取该次运行日志诊断失败原因时用）。</summary>
+    public long Id { get; set; }
     /// <summary>运行结论：success / failure / null（尚未完成）。</summary>
     public string? Conclusion { get; set; }
     /// <summary>运行状态：completed / in_progress / queued 等。</summary>
@@ -62,6 +64,25 @@ public class WorkflowRunInfo
     public long RunNumber { get; set; }
     /// <summary>运行详情页地址。</summary>
     public string? HtmlUrl { get; set; }
+}
+
+/// <summary>
+/// 云端运行失败的诊断结论：一句话原因 + 可执行的修复建议。
+/// 由 <see cref="GitHubApiClient.DiagnoseRunFailureAsync"/> 依据 run 日志归类产生。
+/// </summary>
+public class CloudFailureDiagnosis
+{
+    /// <summary>分类键：secret / session / risk / github / account / unknown。</summary>
+    public string Key { get; set; } = "unknown";
+    public string Reason { get; set; } = "";
+    public string Suggestion { get; set; } = "";
+
+    public static CloudFailureDiagnosis Unknown(string reason) => new()
+    {
+        Key = "unknown",
+        Reason = reason,
+        Suggestion = "点「打开 Actions」查看该次运行日志；常见原因是 Session 过期或命中风控，可先重新登录再重新部署。",
+    };
 }
 
 /// <summary>
@@ -593,6 +614,137 @@ public class GitHubApiClient
         => await GetLatestCheckinRunAsync(token, login, status: "completed");
 
     /// <summary>
+    /// 下载某次 run 的日志并归类失败原因。
+    ///
+    /// 为什么要拉日志：只凭 conclusion=failure 说不清「是 Session 过期、是风控 9074、还是 Secret 没写进去」，
+    /// 用户看到的只是一句「失败了」，无从下手。checkin.py 的失败文案是固定的（见脚本里的
+    /// 「账号会话已失效(HTTP 401)」「缺少环境变量 TRAE_SESSION」「命中风控 9074」等），因此可以精确归类。
+    ///
+    /// 全程尽力而为：日志拿不到就退回「未识别」，绝不因为诊断失败而影响主流程。
+    /// </summary>
+    public async Task<CloudFailureDiagnosis> DiagnoseRunFailureAsync(string token, string login, long runId)
+    {
+        if (runId <= 0) return CloudFailureDiagnosis.Unknown("未取到运行编号，无法自动定位原因");
+        string text = await TryFetchRunLogTextAsync(token, login, runId);
+        return Classify(text);
+    }
+
+    /// <summary>下载 run 日志 zip 并解出可读文本（限流限量，失败返回空串）。</summary>
+    private async Task<string> TryFetchRunLogTextAsync(string token, string login, long runId)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get,
+                $"https://api.github.com/repos/{login}/{SourceRepo}/actions/runs/{runId}/logs");
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            req.Headers.Accept.Clear();
+            req.Headers.Accept.ParseAdd("application/vnd.github+json");
+
+            // 该接口 302 到对象存储；HttpClient 默认跟随跳转，且跨域时会自动去掉 Authorization
+            using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+            if (!resp.IsSuccessStatusCode)
+            {
+                LastError = $"拉取运行日志失败：HTTP {(int)resp.StatusCode}";
+                return "";
+            }
+
+            const int MaxBytes = 8 * 1024 * 1024;
+            using var ms = new MemoryStream();
+            await using (var s = await resp.Content.ReadAsStreamAsync())
+            {
+                var buf = new byte[64 * 1024];
+                int n;
+                while ((n = await s.ReadAsync(buf)) > 0 && ms.Length < MaxBytes)
+                    ms.Write(buf, 0, n);
+            }
+            ms.Position = 0;
+
+            using var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Read);
+            var sb = new StringBuilder();
+            foreach (var entry in zip.Entries)
+            {
+                if (entry.Length == 0) continue;
+                // 只看签到步骤的日志，跳过程序集初始化等噪声
+                var name = entry.FullName;
+                if (!name.Contains("checkin", StringComparison.OrdinalIgnoreCase)
+                    && !name.Contains("Run checkin", StringComparison.OrdinalIgnoreCase)) continue;
+
+                await using var es = entry.Open();
+                using var reader = new StreamReader(es, Encoding.UTF8);
+                var chunk = await reader.ReadToEndAsync();
+                if (chunk.Length > 256 * 1024) chunk = chunk[^262144..];
+                sb.AppendLine(chunk);
+                if (sb.Length > 512 * 1024) break;
+            }
+            return sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            LastError = "拉取运行日志异常：" + ex.Message;
+            return "";
+        }
+    }
+
+    /// <summary>按 checkin.py 的固定失败文案归类原因，并给出对应的修复动作。internal 供无界面自检调用。</summary>
+    internal static CloudFailureDiagnosis Classify(string log)
+    {
+        if (string.IsNullOrWhiteSpace(log))
+            return CloudFailureDiagnosis.Unknown("无法获取运行日志");
+
+        string s = log;
+        bool Has(string k) => s.Contains(k, StringComparison.OrdinalIgnoreCase);
+
+        if (Has("缺少环境变量 TRAE_SESSION") || Has("TRAE_SESSION 为空"))
+            return new CloudFailureDiagnosis
+            {
+                Key = "secret",
+                Reason = "云端没有拿到会话凭证：Actions Secret 缺失或为空",
+                Suggestion = "回到本页点「重新部署」，程序会重新写入 TRAE_SESSION / TRAE_DEVICE_ID 等 Secret；"
+                             + "若仍失败，请到 fork 仓库的 Settings → Secrets 确认这几个 Secret 存在。",
+            };
+
+        if (Has("会话已失效") || Has("GetUserToken 失败: HTTP 401") || Has("HTTP 401"))
+            return new CloudFailureDiagnosis
+            {
+                Key = "session",
+                Reason = "云端登录态已失效（X-Cloudide-Session 过期，约 14 天）",
+                Suggestion = "在本程序重新登录 Trae（设置 → 账号管理 → 重新登录，或本页「重新登录」），"
+                             + "然后点「重新部署」把新 Session 写回云端。注意：换 JWT 不会延长 Session。",
+            };
+
+        if (Has("9074") || Has("参与用户太多"))
+            return new CloudFailureDiagnosis
+            {
+                Key = "risk",
+                Reason = "命中 Trae 风控（9074 参与用户太多）",
+                Suggestion = "换一个非整点时间（避开 08:00 高峰），减少云端账号数量，或为各账号换发新设备号后重新部署。",
+            };
+
+        if (Has("HTTP 403") || Has("rate limit"))
+            return new CloudFailureDiagnosis
+            {
+                Key = "github",
+                Reason = "GitHub 侧拒绝请求（403 / 限流）",
+                Suggestion = "稍后重试；若持续失败，重新授权 GitHub 并确认 fork 仓库的 Actions 权限正常。",
+            };
+
+        if (Has("签到失败"))
+        {
+            // 单账号失败但流程继续：把脚本打印的那几行原样带出来
+            var line = s.Split('\n')
+                        .FirstOrDefault(l => l.Contains("签到失败", StringComparison.OrdinalIgnoreCase))?.Trim() ?? "";
+            return new CloudFailureDiagnosis
+            {
+                Key = "account",
+                Reason = "部分账号签到失败：" + (line.Length > 120 ? line[..120] + "…" : line),
+                Suggestion = "可能是该账号 Session 过期或设备号被风控；为该账号重新登录后重新部署，或按需换发设备号。",
+            };
+        }
+
+        return CloudFailureDiagnosis.Unknown("运行失败，但日志里没有可识别的已知原因");
+    }
+
+    /// <summary>
     /// 只查询「Trae Daily Checkin」这个 workflow 的运行，避免把仓库里其它 workflow
     /// （如 push 触发的 CI Build、tag 触发的 Release）误当成云端签到结果。
     /// </summary>
@@ -614,6 +766,7 @@ public class GitHubApiClient
 
         var run = arr[0];
         var info = new WorkflowRunInfo();
+        info.Id = run.TryGetProperty("id", out var rid) && rid.TryGetInt64(out var ridv) ? ridv : 0;
         info.Conclusion = run.TryGetProperty("conclusion", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
         info.Status = run.TryGetProperty("status", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() : null;
         info.CreatedAt = run.TryGetProperty("created_at", out var ca) && ca.ValueKind == JsonValueKind.String ? ca.GetString() : null;

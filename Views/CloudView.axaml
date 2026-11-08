@@ -99,12 +99,82 @@
                         </StackPanel>
                     </Grid>
 
-                    <Border Background="#1AF59E0B" BorderBrush="{DynamicResource WarningBrush}" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,4,0,0">
+                    <!-- 提示条：普通态黄色，Session 过期/临期/最近运行失败时切红色（WarningIsCritical）。
+                         注意：底色必须由 Style 提供，不能直接写在 Border 上——本地值优先级高于 Style，
+                         否则 critical 样式永远盖不过本地 Background。 -->
+                    <Border CornerRadius="10" Padding="14,10" Margin="0,4,0,0"
+                            Classes.critical="{Binding WarningIsCritical}">
+                        <Border.Styles>
+                            <Style Selector="Border">
+                                <Setter Property="Background" Value="#1AF59E0B" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}" />
+                                <Setter Property="BorderThickness" Value="1" />
+                            </Style>
+                            <Style Selector="Border.critical">
+                                <Setter Property="Background" Value="#1AEF4444" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+                            </Style>
+                            <Style Selector="TextBlock.warnfg">
+                                <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+                            </Style>
+                            <Style Selector="TextBlock.warnfg.critical">
+                                <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+                            </Style>
+                        </Border.Styles>
                         <StackPanel Orientation="Horizontal" Spacing="10">
-                            <TextBlock Text="⚠" FontSize="16" Foreground="{DynamicResource WarningBrush}" VerticalAlignment="Center" />
-                            <TextBlock Text="{Binding WarningText}" FontSize="12" Foreground="{DynamicResource WarningBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                            <TextBlock Text="⚠" FontSize="16" Classes="warnfg"
+                                       Classes.critical="{Binding WarningIsCritical}"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding WarningText}" FontSize="12" Classes="warnfg"
+                                       Classes.critical="{Binding WarningIsCritical}"
+                                       VerticalAlignment="Center" TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- ===== 上次云端运行结果（不实时轮询：只在打开页面/部署结束时读上一次结果） ===== -->
+            <Border Classes="card" Margin="0,10,0,0" IsVisible="{Binding HasLastRun}">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
+                            <TextBlock Grid.Column="0" Text="上次云端运行结果" Classes="card-title" VerticalAlignment="Center" />
+                            <Border Classes="badge-ok" Padding="10,2" VerticalAlignment="Center" IsVisible="{Binding !LastRunFailed}">
+                                <TextBlock Text="{Binding LastRunBadge}" FontSize="11" />
+                            </Border>
+                            <Border Classes="badge-danger" Padding="10,2" VerticalAlignment="Center" IsVisible="{Binding LastRunFailed}">
+                                <TextBlock Text="{Binding LastRunBadge}" FontSize="11" />
+                            </Border>
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Text="{Binding LastRunWhen}" FontSize="11"
+                                   Foreground="{DynamicResource TextSubBrush}" VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" />
+                    </Grid>
+
+                    <!-- 失败：原因 + 怎么修 -->
+                    <StackPanel Spacing="6" IsVisible="{Binding LastRunFailed}">
+                        <TextBlock Text="{Binding LastRunReason}" FontSize="12.5" FontWeight="SemiBold"
+                                   TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}" />
+                        <TextBlock Text="{Binding LastRunSuggestion}" FontSize="11.5" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextMainBrush}" />
+                        <TextBlock Text="正在读取该次运行的日志以定位原因…" FontSize="11"
+                                   IsVisible="{Binding IsDiagnosing}" Foreground="{DynamicResource TextMutedBrush}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                            <Button Classes="btn-primary" Content="重新登录 Trae" Padding="14,7"
+                                    Command="{Binding ReloginCommand}" />
+                            <Button Classes="btn" Content="重新部署" Padding="14,7"
+                                    Command="{Binding OneClickDeployCommand}" />
+                            <Button Classes="btn" Content="打开 Actions" Padding="14,7"
+                                    Command="{Binding OpenActionsCommand}" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- 缓存提示：本次没联网成功，避免用户误以为是刚查到的 -->
+                    <TextBlock Text="本次未能联网确认，以上为本地缓存的上次结果，可能已不是最新。"
+                               IsVisible="{Binding LastRunFromCache}" FontSize="10"
+                               Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" />
+                    <TextBlock Text="仅在打开本页或部署结束时读取「上一次」运行结果，不做实时轮询（云端每天只跑一次）。"
+                               FontSize="10" Foreground="{DynamicResource TextSubBrush}" TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 
@@ -117,7 +187,7 @@
                     </Grid>
                     <StackPanel Orientation="Horizontal" Spacing="10">
                         <TextBox Text="{Binding CloudCheckinTime}" Width="90" Height="34" VerticalContentAlignment="Center"
-                                 FontFamily="Consolas" Watermark="08:00" />
+                                 FontFamily="Consolas" PlaceholderText="08:00" />
                         <Button Classes="btn" Content="应用到云端" Command="{Binding ApplyCloudTimeCommand}"
                                 Height="34" Padding="14,0"
                                 HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />

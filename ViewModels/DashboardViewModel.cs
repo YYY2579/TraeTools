@@ -23,6 +23,14 @@ public record TrendPoint(string DateLabel, double Credits, double X, double Y, s
     public double StepWidth { get; set; }
     /// <summary>是否为当前悬浮命中的点（高亮参考线用）。</summary>
     public bool IsHovered { get; set; }
+    /// <summary>
+    /// 是否为「插值点」：该日没有真实快照，值由前一个有记录的日期延续而来。
+    /// UI 上用半透明点区分，避免把延续值当成真实记录看。
+    /// </summary>
+    public bool IsInterpolated { get; set; }
+
+    /// <summary>数据点圆环不透明度：真实点 1.0，插值点 0.35（直接绑到 Ellipse.Opacity，避免引入转换器）。</summary>
+    public double MarkerOpacity => IsInterpolated ? 0.35 : 1.0;
 }
 
 public partial class DashboardViewModel : ViewModelBase
@@ -46,24 +54,49 @@ public partial class DashboardViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isMember = false;
 
-    /// <summary>立即签到进行中（防止重复点击产生重复记录/状态错乱）。</summary>
+    /// <summary>批量签到进行中（防重入：避免重复点击叠加 claim）。</summary>
     [ObservableProperty]
-    private bool _isQuickChecking;
+    private bool _isBatchRunning;
 
-    /// <summary>是否允许点击「立即签到」（今日已签到/已完成或进行中时禁用）。</summary>
+    /// <summary>是否允许点「一键签到」：进行中、或已勾选账号今日都已签（或没有勾选账号）时禁用。</summary>
     [ObservableProperty]
     private bool _canQuickCheckin = true;
 
+    /// <summary>最近一次一键签到的汇总文案（如「共 3 个账号，成功 3 个，获得 450 积分」）。</summary>
+    [ObservableProperty]
+    private string _batchSummary = "";
+
+    public bool HasBatchSummary => !string.IsNullOrEmpty(BatchSummary);
+
+    partial void OnBatchSummaryChanged(string value) => OnPropertyChanged(nameof(HasBatchSummary));
+
+    /// <summary>按钮悬浮提示：说明本次会签哪些账号、间隔多少秒（勾选与签到页共用）。</summary>
+    [ObservableProperty]
+    private string _checkinIntervalHint = "将依次为已勾选的账号签到";
+
     partial void OnCheckinStatusChanged(string value) => UpdateCanQuickCheckin();
-    partial void OnIsQuickCheckingChanged(bool value) => UpdateCanQuickCheckin();
+    partial void OnIsBatchRunningChanged(bool value) => UpdateCanQuickCheckin();
 
-    /// <summary>重新计算「立即签到」可用性：进行中或今日已签到（已完成/今日已签到）则禁用。</summary>
+    /// <summary>
+    /// 重新计算「一键签到」可用性与提示文案。
+    /// 判定口径与签到页一致：签的是「已勾选（Enabled）且今日未签」的账号。
+    /// </summary>
     private void UpdateCanQuickCheckin()
-        => CanQuickCheckin = !IsQuickChecking && !IsTodayDone(CheckinStatus);
+    {
+        int checkedCount = 0, pending = 0, interval = 5;
+        try
+        {
+            (checkedCount, pending, interval) = MainViewModel.Instance?.BatchCheckinScope() ?? (0, 0, 5);
+        }
+        catch { /* 范围计算失败按不可签处理 */ }
 
-    /// <summary>签到状态是否表示"今日已完成"（不可再签）。</summary>
-    private static bool IsTodayDone(string s)
-        => s is "今日已签到 ✓" or "已完成 ✓";
+        CanQuickCheckin = !IsBatchRunning && checkedCount > 0 && pending > 0;
+        CheckinIntervalHint = checkedCount == 0
+            ? "没有勾选任何账号，请先到「每日签到」页勾选要签到的账号"
+            : pending == 0
+                ? $"已勾选的 {checkedCount} 个账号今日都已签到"
+                : $"将依次为 {pending} 个账号签到（共 {checkedCount} 个已勾选），账号间隔 {interval} 秒，可在「每日签到」页调整勾选";
+    }
 
     [ObservableProperty]
     private string _currentAccount = "未添加账号";
@@ -155,48 +188,69 @@ public partial class DashboardViewModel : ViewModelBase
     private static void AppendTotalToday(TraeCheckin.TraeAccount acc, double total)
     {
         if (total < 0) return;
-        // 写入 SQLite（ON CONFLICT 自动去重）
+        // 写入 SQLite（ON CONFLICT 覆盖当天值，同步当日消耗）
         try
         {
             MainViewModel.CheckinDb?.InsertSnapshot(acc.Id, total);
         }
         catch { /* 数据库写入失败不影响 */ }
-        // 同时写入旧版文本文件（保持兼容）
+        // 同时写入旧版文本文件（保持兼容）。当天已有行则**覆盖**而非跳过：
+        // 旧实现直接 return，导致当天快照固化在首次刷新那一刻，之后消耗积分不反映到「今日」点。
         try
         {
-            var history = ReadTotalHistory(acc.Id);
-            if (history.Any(h => h.Date.Date == DateTime.Today)) return;
-            var dir = System.IO.Path.GetDirectoryName(TotalHistoryPathFor(acc.Id))!;
+            var path = TotalHistoryPathFor(acc.Id);
+            var dir = System.IO.Path.GetDirectoryName(path)!;
             Directory.CreateDirectory(dir);
-            File.AppendAllText(TotalHistoryPathFor(acc.Id), $"{DateTime.Today:yyyy-MM-dd},{total:0.##}{Environment.NewLine}");
+
+            var today = DateTime.Today;
+            var kept = new List<string>();
+            if (File.Exists(path))
+            {
+                foreach (var line in File.ReadAllLines(path))
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    var parts = line.Split(',');
+                    if (parts.Length == 2 && DateTime.TryParse(parts[0], out var d) && d.Date == today)
+                        continue;   // 丢弃当天旧行，用新值替换
+                    kept.Add(line);
+                }
+            }
+            kept.Add($"{today:yyyy-MM-dd},{total:0.##}");
+            File.WriteAllLines(path, kept);
         }
         catch { /* 记录失败不影响 */ }
     }
 
-    /// <summary>从该账号真实总积分历史重建曲线（近 N 天），并更新 Y 轴刻度。</summary>
+    /// <summary>趋势图窗口天数（固定 14 个日历槽位，日期本身等距，等距绘制才是正确的时间轴）。</summary>
+    private const int TrendDays = 14;
+
+    /// <summary>
+    /// 从该账号真实总积分历史重建曲线。
+    ///
+    /// 关键修正：**按真实日期铺 14 个槽位**，不是「有几条记录就均分画布」。
+    /// 旧实现把 `TakeLast(14)` 的结果按索引等距排布，缺一天就少一个点然后整条线重新均分，
+    /// 导致「10/27 之后直接跳 11/1」看起来像连续 4 天平稳，日期与点位完全对不上。
+    /// 缺失日按前值延续，并在数据点上标记 <see cref="TrendPoint.IsInterpolated"/>。
+    /// </summary>
     private void BuildChartFromHistory(string accountId)
     {
-        // 优先从 SQLite 读取趋势数据
-        List<(DateTime Date, double Remaining)> dbTrend = new();
+        // ---- 1) 取数：优先 SQLite，回退旧版文本文件 ----
+        List<(DateTime Date, double Value)> history;
         try
         {
-            dbTrend = MainViewModel.CheckinDb?.GetSnapshotTrend(accountId, 14) ?? new();
+            var dbTrend = MainViewModel.CheckinDb?.GetSnapshotTrend(accountId, 60);
+            history = dbTrend is { Count: > 0 }
+                ? dbTrend.Select(t => (t.Date.Date, t.Remaining)).ToList()
+                : ReadTotalHistory(accountId).Select(t => (t.Date.Date, t.Total)).ToList();
         }
-        catch { /* 数据库读取失败回退到文本文件 */ }
-
-        List<(DateTime Date, double Total)> history;
-        if (dbTrend.Count > 0)
+        catch
         {
-            history = dbTrend.Select(t => (t.Date, t.Remaining)).ToList();
-        }
-        else
-        {
-            history = ReadTotalHistory(accountId);
+            history = ReadTotalHistory(accountId).Select(t => (t.Date.Date, t.Total)).ToList();
         }
 
         if (history.Count == 0)
         {
-            // 无历史：退化为单日当前积分 mock（避免空图）
+            // 无历史：退化单点平线（不生成 mock 曲线，避免误导）
             double[] single = { RemainingCredits, RemainingCredits };
             LinePoints = ComputeLinePoints(single);
             FillGeometry = ComputeFillGeometry(single);
@@ -204,7 +258,6 @@ public partial class DashboardViewModel : ViewModelBase
             XAxisLabels.Clear();
             XAxisLabels.Add("今日");
             ChartYMax = ChartYMid = ChartYMin = (int)RemainingCredits;
-            // 无历史时今日标记同样对齐最后一个数据点，避免落到 (0,0)
             if (LinePoints.Count > 0)
             {
                 TodayX = LinePoints[^1].X - 6;
@@ -213,39 +266,74 @@ public partial class DashboardViewModel : ViewModelBase
             return;
         }
 
-        var recent = history.TakeLast(14).ToList();
-        double[] values = recent.Select(h => h.Total).ToArray();
+        // ---- 2) 铺满 14 个日历槽位，缺失日按前值延续 ----
+        var today = DateTime.Today;
+        var slots = Enumerable.Range(0, TrendDays)
+                              .Select(i => today.AddDays(i - (TrendDays - 1)))
+                              .ToArray();
+
+        var map = new Dictionary<DateTime, double>();
+        foreach (var (d, v) in history) map[d] = v;   // 同一天多条取最后一条
+
+        var values = new double[TrendDays];
+        var isReal = new bool[TrendDays];
+        double? carry = null;
+        for (int i = 0; i < TrendDays; i++)
+        {
+            if (map.TryGetValue(slots[i], out var v))
+            {
+                carry = v;
+                values[i] = v;
+                isReal[i] = true;
+            }
+            else if (carry.HasValue)
+            {
+                values[i] = carry.Value;   // 延续前值（视觉连续，但标记为非真实点）
+            }
+            else
+            {
+                // 轴起点早于该账号第一条记录：用第一条已知值铺平，避免从 0 拉起一根假陡坡
+                values[i] = history[0].Value;
+            }
+        }
+
         LinePoints = ComputeLinePoints(values);
         FillGeometry = ComputeFillGeometry(values);
 
+        // ---- 3) 点位与悬浮数据 ----
         TrendPoints.Clear();
         const double pad = 12;
-        double stepX = values.Length > 1 ? (ChartWidth - 2 * pad) / (values.Length - 1) : 0;
-        TrendStepX = stepX > 0 ? stepX : ChartWidth;
+        double stepX = (ChartWidth - 2 * pad) / (TrendDays - 1);
+        TrendStepX = stepX;
         double min = values.Min();
         double max = values.Max();
-        double range = 1.0 * (max - min == 0 ? 1 : max - min);
-        for (int i = 0; i < values.Length; i++)
+        double range = max - min == 0 ? 1 : max - min;
+
+        for (int i = 0; i < TrendDays; i++)
         {
             double x = pad + i * stepX;
             double y = pad + (ChartHeight - 2 * pad) * (1 - (values[i] - min) / range);
-            TrendPoints.Add(new TrendPoint(recent[i].Date.ToString("M/d"), values[i], x, y,
-                $"{recent[i].Date:yyyy-MM-dd}\n积分：{(int)values[i]}") { StepWidth = TrendStepX });
+            var d = slots[i];
+            string note = isReal[i] ? "" : "\n（无当日记录，按前值延续）";
+            string label = d.Date == today ? "今日" : d.ToString("M/d");
+            TrendPoints.Add(new TrendPoint(label, values[i], x, y,
+                $"{d:yyyy-MM-dd}\n积分：{(int)values[i]}{note}")
+            {
+                StepWidth = TrendStepX,
+                IsInterpolated = !isReal[i],
+            });
         }
+
+        // ---- 4) X 轴标签：固定 7 个，与槽位一一对应（首/末必显示） ----
         XAxisLabels.Clear();
-        int labelCount = Math.Max(1, Math.Min(8, recent.Count));
-        int span = recent.Count - 1;
-        for (int i = 0; i < labelCount; i++)
-        {
-            int idx = labelCount > 1 ? (int)Math.Round(i * (double)span / (labelCount - 1)) : 0;
-            XAxisLabels.Add(idx == recent.Count - 1 ? "今日" : recent[idx].Date.ToString("M/d"));
-        }
+        int[] labelIdx = { 0, 2, 4, 6, 8, 10, TrendDays - 1 };
+        foreach (var idx in labelIdx)
+            XAxisLabels.Add(slots[idx].Date == today ? "今日" : slots[idx].ToString("M/d"));
 
         ChartYMax = (int)Math.Ceiling(max);
         ChartYMid = (int)Math.Ceiling((max + min) / 2);
         ChartYMin = (int)Math.Floor(min);
 
-        // 今日标记点（历史路径此前未赋值会画到 (0,0)，导致左上角出现白点）
         if (TrendPoints.Count > 0)
         {
             TodayX = TrendPoints[^1].X - 6;
@@ -330,6 +418,8 @@ public partial class DashboardViewModel : ViewModelBase
                         Name = name,
                         Initial = name.Length > 0 ? name[0].ToString() : "?",
                         Color = colors[idx % colors.Length],
+                        // 各账号自己的剩余积分（-1 时界面显示「—」，不伪装成 0 分）
+                        Credits = acc.RemainingCredits,
                         Status = acc.LastCheckinDate.HasValue && acc.LastCheckinDate.Value.Date == DateTime.Today ? "已签到" : "待签到",
                         StatusType = acc.LastCheckinDate.HasValue && acc.LastCheckinDate.Value.Date == DateTime.Today ? "ok" : "info",
                         IsCurrent = acc.Id == cfg.ActiveAccountId
@@ -588,6 +678,23 @@ public partial class DashboardViewModel : ViewModelBase
                 AppendTotalToday(acc, remaining);
                 BuildChartFromHistory(acc.Id);
             }
+
+            // 连续签到天数：与「每日签到」页同口径（从今天/昨天往前数连签）。
+            // 原实现从未给 StreakDays 赋值，卡片永远显示「0 天」，与签到页对不上。
+            try
+            {
+                var signed = MainViewModel.CheckinDb?.GetSignedDates() ?? new HashSet<DateTime>();
+                if (acc.LastCheckinDate is DateTime lc) signed.Add(lc.Date);
+                int streak = 0;
+                var cursor = DateTime.Today;
+                if (!signed.Contains(cursor)) cursor = cursor.AddDays(-1);
+                while (signed.Contains(cursor)) { streak++; cursor = cursor.AddDays(-1); }
+                StreakDays = streak;
+            }
+            catch { /* 连签计算失败保留旧值 */ }
+
+            // 刷新后重算「一键签到」可用范围与提示（勾选账号数/待签数/间隔秒数会变）
+            UpdateCanQuickCheckin();
         }
         catch (Exception ex)
         {
@@ -648,110 +755,52 @@ public partial class DashboardViewModel : ViewModelBase
         catch { /* 登录窗口异常不影响 */ }
     }
 
-    /// <summary>上次快签尝试时间（冷却用：连点快签会 1 秒内多次打 claim，加重 9074 风控）。</summary>
-    private static DateTime _lastQuickCheckinAttempt = DateTime.MinValue;
-    private static readonly TimeSpan QuickCheckinCooldown = TimeSpan.FromSeconds(10);
+    /// <summary>上次批量签到尝试时间（冷却用：连点会 1 秒内多次打 claim，加重 9074 风控）。</summary>
+    private static DateTime _lastBatchAttempt = DateTime.MinValue;
+    private static readonly TimeSpan BatchCooldown = TimeSpan.FromSeconds(10);
 
+    /// <summary>
+    /// 仪表盘「一键签到」：与「每日签到」页共用同一条批量路径（<see cref="CheckinViewModel.RunBatchCheckinAsync"/>），
+    /// 也就自动继承了账号间间隔、勾选范围、未登录先弹窗、9074 换设备号重试、飞书推送。
+    /// 旧实现（QuickCheckin）只签当前激活账号，名为「立即签到」实为单账号，语义误导。
+    /// </summary>
     [RelayCommand]
-    private async Task QuickCheckin()
+    private async Task BatchCheckin()
     {
-        if (IsQuickChecking) return;   // 防重入：禁止重复点击导致重复记录
-        // 冷却：距上次尝试不足 10s 直接提示，不再发请求（旧版连点 4 次=4 秒内 4 次 claim，必然加重风控）
-        var sinceLast = DateTime.Now - _lastQuickCheckinAttempt;
-        if (sinceLast < QuickCheckinCooldown)
+        if (IsBatchRunning) return;   // 防重入
+        var sinceLast = DateTime.Now - _lastBatchAttempt;
+        if (sinceLast < BatchCooldown)
         {
-            CheckinStatus = $"操作太频繁，{(int)(QuickCheckinCooldown - sinceLast).TotalSeconds + 1}s 后可重试";
+            BatchSummary = $"操作太频繁，{(int)(BatchCooldown - sinceLast).TotalSeconds + 1}s 后可重试";
             return;
         }
-        _lastQuickCheckinAttempt = DateTime.Now;
-        IsQuickChecking = true;
+        _lastBatchAttempt = DateTime.Now;
+        IsBatchRunning = true;
         try
         {
-            var cfg = MainViewModel.AppConfig;
-            var api = MainViewModel.CheckinApi;
-            if (cfg == null || api == null)
+            var vm = MainViewModel.Instance;
+            if (vm == null)
             {
-                RaiseNavigateRequested("checkin");
+                BatchSummary = "服务未初始化";
                 return;
             }
 
-            var acc = cfg.Accounts.FirstOrDefault(a => a.Id == cfg.ActiveAccountId)
-                      ?? cfg.Accounts.FirstOrDefault();
-            if (acc == null || string.IsNullOrEmpty(acc.Token))
-            {
-                RaiseNavigateRequested("checkin");
-                return;
-            }
+            var (any, ok, total, gained, summary) = await vm.RunBatchCheckinAsync();
+            BatchSummary = summary;
+            if (any) CheckinStatus = "今日已签到 ✓";
 
-            // 独立 API 实例：LastError 隔离 + 走当前账号代理
-            api = new TraeApiClient(AccountHelpers.ResolveProxy(acc));
-
-            var name = string.IsNullOrEmpty(acc.Name) ? (acc.Id.Length > 6 ? acc.Id[..6] : acc.Id) : acc.Name!;
-            AccountHelpers.CheckinLog(name, $"[仪表盘快签] 开始签到，DeviceId={acc.DeviceId}");
-
-            // token 失效先静默换新（有账号级闸门，不会重复探测），换不动才提示重登
-            if (!await AccountHelpers.EnsureValidTokenAsync(acc) || string.IsNullOrEmpty(acc.Token))
-            {
-                CheckinStatus = "需重登";
-                AccountHelpers.CheckinLog(name, "[仪表盘快签] Token 校验/换新失败，请重新登录");
-                RaiseNavigateRequested("checkin");
-                return;
-            }
-
-            // 9074 风控自动换设备号重试（对齐 checkin.py）
-            var result = await AccountHelpers.ClaimWithRiskRetryAsync(api, acc, name);
-            if (result != null && result.code == 0)
-            {
-                CheckinStatus = "已完成 ✓";
-                // 非会员 150，会员 150 + 50 连签
-                TodayReward = "+" + (int)(result.credits + (acc.IsMember ? result.extra_credits : 0));
-                AccountHelpers.MarkTokenValidPublic(acc.Id);
-
-                // 同一天已签到过则不重复写历史（避免手动/自动重复产生多条记录）
-                bool wasDoneToday = acc.LastCheckinDate.HasValue && acc.LastCheckinDate.Value.Date == DateTime.Today;
-                acc.LastCheckinDate = DateTime.Now;
-                cfg.LastCheckinDate = DateTime.Now;
-                // 解析本次所得并写入签到历史（与签到页/自动签到同口径）
-                try
-                {
-                    var after = await api.GetStatusAsync(acc.Token, acc.DeviceId);
-                    double gained = TraeCheckin.CheckinEvaluator.ResolveGainedCredits(after ?? result, acc.IsMember);
-                    if (!wasDoneToday) AccountHelpers.AppendHistory(acc, gained);
-                    AccountHelpers.CheckinLog(name, $"[仪表盘快签] 签到成功，获得 {gained} 积分");
-                }
-                catch { /* 历史写入失败不影响 */ }
-                // 刷新积分
-                var credits = await api.GetRemainingCreditsAsync(acc.Token, acc.DeviceId);
-                if (credits > 0 || (credits >= 0 && string.IsNullOrEmpty(api.LastError)))
-                {
-                    RemainingCredits = (int)credits;
-                    acc.RemainingCredits = credits;   // 按账号持久化
-                    cfg.LastRemaining = credits;
-                }
-                try { cfg.Save(); } catch { /* 忽略 */ }
-
-                // 实时联动：刷新账号概览状态 + 积分趋势曲线（今日积分已变）
-                try
-                {
-                    if (credits >= 0) AppendTotalToday(acc, credits);
-                    BuildChartFromHistory(acc.Id);
-                }
-                catch { /* 联动刷新失败不影响签到 */ }
-                PopulateAccounts();
-            }
-            else
-            {
-                AccountHelpers.CheckinLog(name, $"[仪表盘快签] Claim 失败：code={result?.code ?? -1}, message={result?.message ?? "null"}");
-            }
+            // 签到后重读真实状态/积分/趋势，并刷新账号概览（含各账号剩余积分）
+            await RefreshAllAsync();
+            UpdateCanQuickCheckin();
         }
-        catch
+        catch (Exception ex)
         {
-            // 签到失败时跳转到签到页
-            RaiseNavigateRequested("checkin");
+            BatchSummary = $"签到异常：{ex.Message}";
         }
         finally
         {
-            IsQuickChecking = false;
+            IsBatchRunning = false;
+            UpdateCanQuickCheckin();
         }
     }
 }

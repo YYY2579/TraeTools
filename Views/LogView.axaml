@@ -124,8 +124,9 @@
                               VerticalScrollBarVisibility="Auto"
                               IsVisible="{Binding IsRecentTab}">
                     <StackPanel Spacing="0" Margin="8,4">
-                        <TextBlock Text="本次运行还没有日志" Classes="empty-desc" Margin="0,24"
-                                   HorizontalAlignment="Center" IsVisible="{Binding IsRecentEmpty}" />
+                        <TextBlock Text="暂无日志：程序运行产生的日志会实时出现在这里；也可切到「全部」查看历史归档文件" Classes="empty-desc" Margin="0,24"
+                                   HorizontalAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                                   IsVisible="{Binding IsRecentEmpty}" />
                         <ItemsControl ItemsSource="{Binding Recent}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>

@@ -321,6 +321,45 @@ public partial class SwitchViewModel : ViewModelBase
         foreach (var s in Steps) s.Status = "idle";
     }
 
+    /// <summary>用资源管理器（macOS 用 open）打开目录；不存在的目录先建出来，避免资源管理器报错。</summary>
+    private void OpenFolder(string? path, string what)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                AppendLog($"{what}路径为空，无法打开");
+                return;
+            }
+            Directory.CreateDirectory(path);
+            if (OperatingSystem.IsWindows())
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
+            else
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("open", $"\"{path}\"") { UseShellExecute = true });
+            AppendLog($"已打开{what}：{path}");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"打开{what}失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>打开 TraeTools 数据根目录（config.json / data / logs / vault 都在这里）。</summary>
+    [RelayCommand]
+    private void OpenDataDir() => OpenFolder(TraeTools.Services.DataPaths.Root, "数据目录");
+
+    /// <summary>打开登录态备份 vault 目录。</summary>
+    [RelayCommand]
+    private void OpenVaultDir() => OpenFolder(TraeTools.Services.DataPaths.VaultDir, "vault 目录");
+
+    /// <summary>打开当前探测到的客户端程序所在目录。</summary>
+    [RelayCommand]
+    private void OpenClientDir()
+    {
+        var exe = ClientExePath;
+        OpenFolder(string.IsNullOrEmpty(exe) ? null : Path.GetDirectoryName(exe), "客户端目录");
+    }
+
     [RelayCommand]
     private void RefreshList()
     {

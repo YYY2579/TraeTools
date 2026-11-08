@@ -24,6 +24,8 @@ public class AppConfig
     /// <summary>X-Cloudide-Session 会话 Cookie 值（约 14 天有效），用于 token 失效时静默换新。</summary>
     public string? Session { get; set; }
     public DateTime? TokenUpdatedAt { get; set; }
+    /// <summary>Session（X-Cloudide-Session）最近一次写入时间；约 14 天有效，不因换 JWT 续期。</summary>
+    public DateTime? SessionUpdatedAt { get; set; }
     /// <summary>GitHub OAuth 设备码授权得到的 access_token（用于云端自动签到部署）。</summary>
     public string? GitHubToken { get; set; }
     /// <summary>GitHub 授权后的登录用户名（fork 目标 owner）。</summary>
@@ -36,6 +38,10 @@ public class AppConfig
     /// <summary>多账号签到间隔（秒），每个账号签到完成后等待该时长再签到下一个；默认 5 秒。</summary>
     public int CheckinIntervalSeconds { get; set; } = 5;
     public DateTime? LastCheckinDate { get; set; }
+    /// <summary>
+    /// 上次发出「到点仍未签到」告警的日期。用于每天只告警一次（重启程序也不会重复轰炸）。
+    /// </summary>
+    public DateTime? LastMissedAlertDate { get; set; }
     public double LastRemaining { get; set; } = -1;
     /// <summary>全部 Trae 账号（多账号模型主存储）。</summary>
     public List<TraeAccount> Accounts { get; set; } = new();
@@ -64,6 +70,21 @@ public class AppConfig
     /// 打开云端页面时若指纹与当前账号不一致，会自动把新凭据同步到云端，避免 Session 更新后云端仍用旧值。
     /// </summary>
     public string CloudSecretsHash { get; set; } = "";
+
+    // ===== 最近一次已知的云端运行结果（用于「不实时检测、下次打开时提醒」）=====
+    // 落盘原因：GitHub 接口不可达时（断网、代理故障）也能把上次的失败原因和修复建议展示出来，
+    // 而不是让用户面对一个空白的部署状态区。
+
+    /// <summary>最近一次已知 run 的 id（换 run 时才重新拉日志诊断，避免每次进页面都下载）。</summary>
+    public long CloudLastRunId { get; set; }
+    /// <summary>最近一次已知 run 的结论：success / failure / ""。</summary>
+    public string CloudLastRunConclusion { get; set; } = "";
+    /// <summary>最近一次已知 run 的完成时间（用于「昨天 08:12 的那次运行失败了」这类表述）。</summary>
+    public DateTime? CloudLastRunAt { get; set; }
+    /// <summary>失败原因（由运行日志归类得出，如「云端登录态已失效」）。</summary>
+    public string CloudLastRunReason { get; set; } = "";
+    /// <summary>对应的修复建议。</summary>
+    public string CloudLastRunSuggestion { get; set; } = "";
 
     /// <summary>是否启用网络代理（签到/用量/GitHub 接口与登录浏览器统一走此代理）。</summary>
     public bool ProxyEnabled { get; set; }
@@ -207,6 +228,7 @@ public class AppConfig
             Session = cfg.Session,
             DeviceId = string.IsNullOrEmpty(cfg.DeviceId) ? "" : cfg.DeviceId,
             TokenUpdatedAt = cfg.TokenUpdatedAt,
+            SessionUpdatedAt = cfg.SessionUpdatedAt,
             LastCheckinDate = cfg.LastCheckinDate
         });
         return true;
@@ -297,6 +319,7 @@ public class AppConfig
             Token = EncryptSecret(Token),
             Session = EncryptSecret(Session),
             TokenUpdatedAt = TokenUpdatedAt,
+            SessionUpdatedAt = SessionUpdatedAt,
             GitHubToken = EncryptSecret(GitHubToken),
             GitHubLogin = GitHubLogin,
             FeishuWebhook = FeishuWebhook,
@@ -307,6 +330,7 @@ public class AppConfig
             AutoCheckinTime = AutoCheckinTime,
             CheckinIntervalSeconds = CheckinIntervalSeconds,
             LastCheckinDate = LastCheckinDate,
+            LastMissedAlertDate = LastMissedAlertDate,
             LastRemaining = LastRemaining,
             ActiveAccountId = ActiveAccountId,
             WindowLeft = WindowLeft,
@@ -318,6 +342,11 @@ public class AppConfig
             MinimizeToTray = MinimizeToTray,
             CloudCheckinTime = CloudCheckinTime,
             CloudSecretsHash = CloudSecretsHash,
+            CloudLastRunId = CloudLastRunId,
+            CloudLastRunConclusion = CloudLastRunConclusion,
+            CloudLastRunAt = CloudLastRunAt,
+            CloudLastRunReason = CloudLastRunReason,
+            CloudLastRunSuggestion = CloudLastRunSuggestion,
             ProxyEnabled = ProxyEnabled,
             ProxyServer = ProxyServer,
             // ===== 本次 PR 追加项 =====
@@ -356,6 +385,7 @@ public class AppConfig
                 DeviceId = EncryptSecret(a.DeviceId) ?? a.DeviceId,
                 AccountUid = a.AccountUid,
                 TokenUpdatedAt = a.TokenUpdatedAt,
+                SessionUpdatedAt = a.SessionUpdatedAt,
                 LastCheckinDate = a.LastCheckinDate,
                 RemainingCredits = a.RemainingCredits,
                 Enabled = a.Enabled,

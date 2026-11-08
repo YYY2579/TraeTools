@@ -23,7 +23,11 @@
         </Style>
     </UserControl.Styles>
 
-    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="0,0,14,0">
+    <!-- 整页可滚动：内容区高度由主窗口第 3 行（*）决定，非全屏时若不滚动，
+         下方「积分过期日志」会被挤出可视区（旧实现根 Grid 用 Auto 行 + 无外层滚动）。 -->
+    <ScrollViewer Background="Transparent" HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto">
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" Margin="0,0,14,0">
 
             <!-- ===== Header ===== -->
             <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
@@ -121,7 +125,7 @@
                         <!-- AllowAutoHide 必须显式设在 ListBox 上：其模板内嵌 ScrollViewer 用 TemplateBinding 取该值
                              （Template 优先级高于 App 层样式），不显式设置会退回覆盖模式，滑轨会压住右侧分值 -->
                         <ListBox Grid.Row="1" ItemsSource="{Binding Sessions}" Background="Transparent"
-                                 Focusable="False" Margin="0,6,0,0"
+                                 Focusable="False" Margin="0,6,0,0" MinHeight="300" MaxHeight="460"
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  ScrollViewer.AllowAutoHide="False">
                             <ListBox.Styles>
@@ -172,7 +176,7 @@
                 <Border Grid.Column="1" Classes="card" Margin="10,0,0,0">
                     <Grid RowDefinitions="Auto,*">
                         <TextBlock Grid.Row="0" Text="模型分布" Classes="card-title" />
-                        <ScrollViewer Grid.Row="1" Margin="0,6,0,0" HorizontalScrollBarVisibility="Disabled">
+                        <ScrollViewer Grid.Row="1" Margin="0,6,0,0" MinHeight="300" MaxHeight="460" HorizontalScrollBarVisibility="Disabled">
                             <ItemsControl ItemsSource="{Binding ModelStats}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate x:DataType="models:ModelUsageStat">
@@ -237,4 +241,5 @@
                 </StackPanel>
             </Border>
         </Grid>
+    </ScrollViewer>
 </UserControl>

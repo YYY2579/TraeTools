@@ -342,26 +342,17 @@ public static class AccountHelpers
 
     // ==================== 通用分类日志（排查问题用） ====================
 
-    /// <summary>日志文件锁（独立于 HistoryIoLock，避免签到高峰争用）。</summary>
-    private static readonly object LogLock = new();
-
     /// <summary>
-    /// 写入一条分类调试日志到 {category}_log_yyyyMM.txt。
+    /// 写入一条分类调试日志。**统一走 <see cref="TraeTools.Services.AppLog"/>**：
+    /// 该出口同时维护内存环形缓冲（日志页「最近」实时可见）、触发 EntryAdded 事件，
+    /// 并按 <c>{category}_log_yyyyMM.txt</c> 落盘（与历史文件名一致，旧日志仍可读）。
+    ///
+    /// 历史坑：本方法原先是直接 File.AppendAllText 自己落盘，绕开了内存缓冲，
+    /// 导致日志页「最近」永远为空（只有仪表盘刷新等少数走 Services.AppLog 的路径才有记录）。
     /// 各模块按 category 归档：checkin / account / cloud / switch / usage。
     /// </summary>
     public static void AppLog(string category, string accountName, string message)
-    {
-        try
-        {
-            lock (LogLock)
-            {
-                var logFile = Path.Combine(LogsDir, $"{category}_log_{DateTime.Now:yyyyMM}.txt");
-                var name = string.IsNullOrEmpty(accountName) ? "?" : accountName;
-                File.AppendAllText(logFile, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{name}] {message}{Environment.NewLine}");
-            }
-        }
-        catch { /* 日志写入失败不影响业务 */ }
-    }
+        => TraeTools.Services.AppLog.Info(category, accountName, message);
 
     /// <summary>签到日志快捷方法（兼容已有调用）。</summary>
     public static void CheckinLog(string accountName, string message)

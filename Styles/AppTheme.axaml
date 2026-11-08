@@ -241,6 +241,56 @@
         <Setter Property="FontSize" Value="13" />
     </Style>
 
+    <!-- ========== CTA Button Style（页面唯一主操作：比 btn-primary 更重，带渐变与阴影） ==========
+         只用于仪表盘「一键签到」这类最高优先级动作，避免全局 btn-primary 变大导致所有页面主按钮失真 -->
+    <Style Selector="Button.btn-cta">
+        <Setter Property="Foreground" Value="White" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="Padding" Value="22,11" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="Background">
+            <Setter.Value>
+                <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                    <GradientStop Color="#FF1D4ED8" Offset="0" />
+                    <GradientStop Color="#FF3B82F6" Offset="1" />
+                </LinearGradientBrush>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style Selector="Button.btn-cta:pointerover /template/ ContentPresenter">
+        <Setter Property="Background">
+            <Setter.Value>
+                <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                    <GradientStop Color="#FF1E40AF" Offset="0" />
+                    <GradientStop Color="#FF2563EB" Offset="1" />
+                </LinearGradientBrush>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style Selector="Button.btn-cta:pressed /template/ ContentPresenter">
+        <Setter Property="Background">
+            <Setter.Value>
+                <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                    <GradientStop Color="#FF1E3A8A" Offset="0" />
+                    <GradientStop Color="#FF1D4ED8" Offset="1" />
+                </LinearGradientBrush>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style Selector="Button.btn-cta:disabled">
+        <Setter Property="Opacity" Value="0.42" />
+    </Style>
+
+    <!-- ========== 设置页分段标题 ========== -->
+    <Style Selector="TextBlock.section-title">
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource TextMainBrush}" />
+        <Setter Property="Margin" Value="0,6,0,0" />
+    </Style>
+
     <!-- ========== Danger Button Style（需重登/警示操作） ========== -->
     <Style Selector="Button.btn-danger">
         <Setter Property="Background" Value="{DynamicResource DangerBrush}" />
@@ -315,9 +365,15 @@
         <Setter Property="HorizontalContentAlignment" Value="Left" />
         <Setter Property="FontWeight" Value="Normal" />
     </Style>
+    <!-- 悬停底色用主题令牌（原 #22FFFFFF 在浅色侧栏上是白雾，且会盖掉选中项的强调色底）。
+         注意 Foreground 不要在 ContentPresenter 上设 TextElement.Foreground=White：
+         那是共享的继承属性，会把「选中项」的白字留在被覆盖后的浅底上 → 完全看不清。 -->
     <Style Selector="Button.nav-item:pointerover /template/ ContentPresenter">
-        <Setter Property="Background" Value="#22FFFFFF" />
-        <Setter Property="TextElement.Foreground" Value="White" />
+        <Setter Property="Background" Value="{DynamicResource HoverTintBrush}" />
+    </Style>
+    <!-- 选中项悬停：底色调深一档，白字仍然可读 -->
+    <Style Selector="Button.nav-item-active:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource AccentDeepBrush}" />
     </Style>
     <Style Selector="Button.nav-item-active">
         <Setter Property="Background" Value="{DynamicResource AccentBrush}" />

@@ -48,6 +48,14 @@ public partial class AccountInfo : ObservableObject
     [ObservableProperty]
     private bool _isCurrent;
 
+    /// <summary>该账号剩余积分（-1 = 尚未刷新过，界面显示「—」而不是误导性的 0）。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CreditsText))]
+    private double _credits = -1;
+
+    /// <summary>剩余积分展示文案。</summary>
+    public string CreditsText => Credits < 0 ? "—" : $"{(int)Credits} 分";
+
     public IBrush AvatarBrush
     {
         get
@@ -159,12 +167,20 @@ public class CalendarDay
     public string ToolTipText { get; set; } = "";
 }
 
-public class SwitchStep
+/// <summary>
+/// 账号切换守护流程的一步。
+/// 必须继承 ObservableObject：Status 改动后要通知 StatusFgBrush 等计算属性，
+/// 否则界面永远停在初始的 pending 灰点（原实现是纯 POCO，改状态 UI 毫无反应）。
+/// </summary>
+public partial class SwitchStep : ObservableObject
 {
     public int Index { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
-    public string Status { get; set; } = "pending";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StatusFgBrush))]
+    private string _status = "pending";
 
     public IBrush StatusFgBrush
     {
@@ -181,17 +197,28 @@ public class SwitchStep
     }
 }
 
-public class CloudStep
+/// <summary>
+/// 云端部署流程的一步。同 <see cref="SwitchStep"/>：必须能通知，
+/// 否则「部署流程」三段永远显示「待启用 ○」，即使部署已成功。
+/// </summary>
+public partial class CloudStep : ObservableObject
 {
     public int Index { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
-    public string Status { get; set; } = "pending";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StatusText))]
+    [NotifyPropertyChangedFor(nameof(StatusFgBrush))]
+    [NotifyPropertyChangedFor(nameof(StatusBgBrush))]
+    private string _status = "pending";
+
     public string StatusText => Status switch
     {
         "ok" => "已完成 ✓",
         "progress" => "进行中 ◐",
         "pending" => "待启用 ○",
+        "warn" => "未完成 ⚠",
         _ => Status
     };
     public IBrush StatusFgBrush
