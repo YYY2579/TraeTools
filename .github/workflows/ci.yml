@@ -38,12 +38,58 @@ jobs:
           Compress-Archive -Path publish_aot\* -DestinationPath TraeTools-win-x64.zip -Force
           Get-ChildItem TraeTools-win-x64.zip | Select-Object Name, Length
 
+      # MSI 定义改了要能当场发现：WiX 语法错只会在构建时报，不会在 dotnet build 报
+      - name: Build MSI (validates installer/TraeTools.wxs)
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+          $ver = (Get-Content version.json -Raw | ConvertFrom-Json).version
+          wix build installer/TraeTools.wxs -arch x64 -d PublishDir=publish_aot -d ProductVersion=$ver -o TraeTools-win-x64.msi
+          Get-Item TraeTools-win-x64.msi | Select-Object Name, Length
+
+      # 无界面自检：日志链路 / 失败原因归类（跨平台，纯离线）
+      - name: Headless self-tests
+        run: |
+          dotnet bin/Release/net10.0/win-x64/TraeTools.dll --log-selftest
+          dotnet bin/Release/net10.0/win-x64/TraeTools.dll --diagnose-selftest
+
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
           name: TraeTools-win-x64
-          path: TraeTools-win-x64.zip
+          path: |
+            TraeTools-win-x64.msi
+            TraeTools-win-x64.zip
           if-no-files-found: error
+
+  # macOS 桌面版（Avalonia，本仓库代码）编译校验。
+  # 之前只有 release 才编它，mac 编不过要等发版才发现；这里加一道 PR 级门禁。
+  macos-desktop:
+    name: macOS 桌面版编译校验
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [osx-arm64, osx-x64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build (${{ matrix.rid }})
+        run: dotnet build TraeTools.csproj -c Release -r ${{ matrix.rid }} --self-contained true
+
+      - name: Headless self-tests
+        run: |
+          dotnet bin/Release/net10.0/${{ matrix.rid }}/TraeTools.dll --crypto-selftest
+          dotnet bin/Release/net10.0/${{ matrix.rid }}/TraeTools.dll --log-selftest
+          dotnet bin/Release/net10.0/${{ matrix.rid }}/TraeTools.dll --diagnose-selftest
+          dotnet bin/Release/net10.0/${{ matrix.rid }}/TraeTools.dll --switch-path-selftest
 
   macos:
     name: macOS 包（Intel + Apple Silicon）
