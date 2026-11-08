@@ -50,11 +50,24 @@ jobs:
           Compress-Archive -Path publish_aot\* -DestinationPath TraeTools-win-x64.zip -Force
           Get-ChildItem -Path publish, publish_aot, TraeTools-win-x64.zip | Select-Object Name, Length
 
+      # 安装包（MSI）：用户不喜欢「解压即用」的便携包，所以除 zip 外再出一个正规安装包。
+      # 安装到 Program Files\TraeTools，带开始菜单/桌面快捷方式与卸载项，升级时按 UpgradeCode 覆盖安装。
+      # zip 仍然保留：应用内更新器下载的就是它（解包 + 原子替换），两者不能互相替代。
+      - name: Build MSI installer (WiX)
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+          $ver = (Get-Content version.json -Raw | ConvertFrom-Json).version
+          wix build installer/TraeTools.wxs -arch x64 -d PublishDir=publish_aot -d ProductVersion=$ver -o TraeTools-win-x64.msi
+          Get-Item TraeTools-win-x64.msi | Select-Object Name, Length
+
       - name: Upload Windows packages
         uses: actions/upload-artifact@v4
         with:
           name: win-packages
           path: |
+            TraeTools-win-x64.msi
             TraeTools-win-x64.zip
             publish\TraeTools.exe
             publish_aot\TraeTools.LoginHost.exe
@@ -202,26 +215,32 @@ jobs:
           {
             echo "TraeTools ${GITHUB_REF_NAME}"
             echo ""
-            echo "### 📦 下载"
+            echo "### 下载"
             echo ""
-            echo "- 🪟 Windows x64：\`TraeTools-win-x64.zip\`（NativeAOT 整包，解压运行，无需安装 .NET 运行时）"
-            echo "- 🍎 **macOS 完整版** Apple Silicon (M 系列)：\`TraeTools-macos-arm64.dmg\`（完整窗口应用：仪表盘 / 用量统计 / 每日签到 / 云端签到 / 运行日志 / 设置；账号切换暂未开放）"
-            echo "- 🍎 **macOS 完整版** Intel：\`TraeTools-macos-x64.dmg\`（同上）"
-            echo "- 🍎 macOS 菜单栏轻量版：\`TraeBar-macos-arm64.dmg\` / \`TraeBar-macos-x64.dmg\`（无主窗口，只在菜单栏常驻做自动签到，体积极小）"
-            echo "- \`TraeTools.exe\` / \`TraeTools.LoginHost.exe\` 为 Windows 单文件引导包，仅用于老版本客户端首次升级"
+            echo "| 平台 | 文件 | 说明 |"
+            echo "|---|---|---|"
+            echo "| Windows x64 | \`TraeTools-win-x64.msi\` | **推荐**。安装到 Program Files，含开始菜单/桌面快捷方式与卸载项，可覆盖升级 |"
+            echo "| Windows x64 | \`TraeTools-win-x64.zip\` | 免安装整包（解压即用）。应用内更新用它，一般无需手动下载 |"
+            echo "| macOS Apple Silicon | \`TraeTools-macos-arm64.dmg\` | M1 / M2 / M3 / M4 |"
+            echo "| macOS Intel | \`TraeTools-macos-x64.dmg\` | x86_64 机型 |"
+            echo "| macOS 菜单栏版 | \`TraeBar-macos-arm64.dmg\` / \`-x64.dmg\` | 轻量版，无主窗口，仅菜单栏自动签到 |"
             echo ""
-            echo "macOS 版未做 Apple 公证，首次打开需放行：\`xattr -cr /Applications/TraeTools.app\`，或在「系统设置 → 隐私与安全性」底部点「仍要打开」。"
+            echo "### 安装说明"
             echo ""
-            echo "Windows 与 macOS 的应用内「检查更新」都会下载本 Release 对应平台的包：Windows 取 \`TraeTools-win-x64.zip\` 整套替换后重启；macOS 取 \`TraeTools-macos-<架构>.dmg\`，挂载后替换整个 .app（失败自动回滚旧版）。"
+            echo "- **Windows**：双击 MSI 安装（需要管理员权限）。已装旧版会直接覆盖升级，设置与账号数据保留在 \`%APPDATA%\\TraeTools\`，不随卸载删除。"
+            echo "- **macOS 完整版**：打开 dmg，把 TraeTools 拖进 Applications。未做 Apple 公证，首次启动需在终端执行 \`xattr -cr /Applications/TraeTools.app\`，或在「系统设置 → 隐私与安全性」点「仍要打开」。"
+            echo "- **macOS 菜单栏版**：同上放行步骤，程序位于菜单栏，无 Dock 窗口。"
+            echo ""
+            echo "### 更新方式"
+            echo ""
+            echo "设置 → 检查更新，自动下载对应架构的包：Windows 用 zip 整套替换后重启；macOS 用 dmg 替换整个 .app（失败自动回滚）。MSI 用户也可直接下载新 MSI 覆盖安装。"
             echo ""
             if [ -n "${PREV}" ]; then
-              echo "## 更新差异（${PREV} → ${GITHUB_REF_NAME}）"
+              echo "### 变更（${PREV#v} → ${CUR}）"
               echo ""
-              git log --oneline --no-merges "${PREV}..HEAD" || true
-              echo ""
-              echo "> 由提交记录自动生成，完整变更请查看 Commits"
+              git log --format='- %s' --no-merges "${PREV}..HEAD" || true
             else
-              echo "（未找到上一版本 tag，此为首个版本）"
+              echo "（首个版本）"
             fi
           } > release_notes.md
           cat release_notes.md

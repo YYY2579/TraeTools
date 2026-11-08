@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  TraeTools Windows 安装包（WiX v5）。
+
+  为什么单独做 MSI：此前 Windows 只发 zip 整包（解压即用），用户普遍反馈「不喜欢便携包」。
+  现在同时产出：
+    · TraeTools-win-x64.msi          安装包（开始菜单/桌面快捷方式、卸载项、升级覆盖安装）
+    · TraeTools-win-x64.zip          AOT 整包，**应用内更新器下载的就是它**，必须保留
+
+  构建（在仓库根目录执行）：
+    dotnet tool install (global) wix version 5.0.2
+    wix build installer/TraeTools.wxs -arch x64 ^
+        -d PublishDir=publish_aot -d ProductVersion=1.5.9 ^
+        -o TraeTools-win-x64.msi
+
+  注意：
+  · UpgradeCode 一旦发布就**不能再改**，否则新版本会与旧版本并存而不是升级覆盖。
+  · PublishDir 里是 AOT publish 目录（exe + 原生库），Files 按相对结构整目录收集。
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Package Name="TraeTools"
+           Manufacturer="YYY2579"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="0ACF3970-FE29-461F-8228-3987B6333EFF"
+           Scope="perMachine"
+           Compressed="yes"
+           InstallerVersion="500">
+
+    <!-- 升级策略：检测到旧版本则先卸载再装（同一 UpgradeCode 下按版本比较） -->
+    <MajorUpgrade DowngradeErrorMessage="已安装更高版本的 TraeTools，请先卸载后再安装。" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- 安装目录：Program Files\TraeTools -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="TraeTools" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppMenuFolder" Name="TraeTools" />
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+
+    <!-- 控制面板「程序和功能」里的图标 -->
+    <Icon Id="AppIcon" SourceFile="Assets\avalonia-logo.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/YYY2579/TraeTools" />
+
+    <Feature Id="Main" Title="TraeTools" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <!-- 主程序与全部依赖：整目录收集（AOT 产物必须与 exe 同目录，不能拆开放） -->
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PublishDir)\**" />
+    </ComponentGroup>
+
+    <!-- 开始菜单快捷方式（HKCU 键作 KeyPath，避免每用户快捷方式触发 ICE38） -->
+    <Component Id="StartMenuShortcut" Directory="AppMenuFolder" Guid="*">
+      <Shortcut Id="StartMenuLink"
+                Name="TraeTools"
+                Description="Trae 签到 · 账号切换 · 用量统计"
+                Target="[INSTALLFOLDER]TraeTools.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AppIcon" />
+      <RemoveFolder Id="RemoveAppMenuFolder" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\YYY2579\TraeTools"
+                     Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="*">
+      <Shortcut Id="DesktopLink"
+                Name="TraeTools"
+                Description="Trae 签到 · 账号切换 · 用量统计"
+                Target="[INSTALLFOLDER]TraeTools.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AppIcon" />
+      <RegistryValue Root="HKCU" Key="Software\YYY2579\TraeTools"
+                     Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+  </Package>
+</Wix>

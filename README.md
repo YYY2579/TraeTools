@@ -1,322 +1,157 @@
-# 🛠️ TraeTools
+# TraeTools
 
-> ✨ 本项目基于 [star620/TraeTools](https://github.com/star620/TraeTools) 二次开发，持续修复 Bug 并新增功能 🎁
-> 🎁 修复了一批影响使用的 Bug，并新增云端定时自定义等能力；如果你喜欢这个项目，**顺手点个 Star ⭐✨ 就是最大的鼓励啦～**
->
-> 📦 提供三类构建：**Windows x64** ／ **macOS 完整版**（Intel 与 Apple Silicon）／ **macOS 菜单栏轻量版 TraeBar**；最新版本号见 [Releases](https://github.com/YYY2579/TraeTools/releases) 与软件左下角
->
-> 🍎 **macOS 有两个包，别装错**：`TraeTools-*` 是完整窗口版（功能与 Windows 对齐），`TraeBar-*` 是只在菜单栏常驻的轻量签到版（**没有窗口**）。怎么选见[下载安装](#-下载安装一步步来)。
+Trae 多账号管理工具：每日签到、云端托管签到、账号切换、用量统计。
+
+> 基于 [star620/TraeTools](https://github.com/star620/TraeTools) 二次开发，持续修 Bug、补功能。
+> 觉得有用就点个 **Star ⭐**，这是最直接的鼓励。
 
 ---
 
-## 🌟 版本概览
+## 下载
 
-> 下面按「为什么值得用」而不是按提交流水账来写。最新版本与逐版本差异见
-> [Releases 页](https://github.com/YYY2579/TraeTools/releases)，每个版本都附自动生成的提交清单。
+最新版本见 [Releases](https://github.com/YYY2579/TraeTools/releases)。
 
-### 🍎 macOS 完整版已上线
+| 平台 | 文件 | 说明 |
+|---|---|---|
+| Windows x64 | `TraeTools-win-x64.msi` | **推荐**。安装到 Program Files，带开始菜单/桌面快捷方式与卸载项 |
+| Windows x64 | `TraeTools-win-x64.zip` | 免安装整包。应用内更新用它，一般无需手动下载 |
+| macOS Apple Silicon | `TraeTools-macos-arm64.dmg` | M1 / M2 / M3 / M4 |
+| macOS Intel | `TraeTools-macos-x64.dmg` | x86_64 机型 |
+| macOS 菜单栏版 | `TraeBar-macos-arm64.dmg` / `-x64.dmg` | 轻量版，无窗口，只在菜单栏做自动签到 |
 
-macOS 从此有了**和 Windows 同一套界面与功能**的完整版本（双架构 dmg），不再只有菜单栏轻量版。
-详见[下载安装](#-下载安装一步步来)与[平台差异](#macos-完整版与-windows-的三处不同)。
+**macOS 有两个程序，别装错**：`TraeTools-*` 是完整窗口版（功能与 Windows 对齐），`TraeBar-*` 是菜单栏轻量版（约 0.2 MB，只做签到）。芯片不确定就点  →「关于本机」看「芯片」那一行。
 
-### 🔧 1.5.x 系列修掉/加上的
+### 安装
 
-| 类别 | 内容 |
-|---|---|
-| 🔐 重新登录 | 修复「重新登录窗口一闪而过」；新增登录身份校验，杜绝把别的账号的凭据存进当前账号（跨账号污染） |
-| 🔑 Session 保护 | 登录时自动补读会话 Cookie（约 14 天续命的关键），绝不覆盖已有的有效 Session |
-| ✅ 签到成功率 | 修复多页面并发探测/换新触发的接口限流风暴；命中 9074 风控自动换设备号重试 |
-| 📊 用量统计 | 新增**积分过期日志**（全账号剩余积分 + 到期时间）、时间范围可选、按账号筛选、顶部快过期提醒 |
-| 🪜 网络代理 | 全局代理 + 每账号覆盖，多账号可分网降低风控关联 |
-| ⏰ 云端签到 | 运行时间可自定义（北京时间 HH:mm）；部署与更新检查全部指向本仓库，二开链路自洽 |
-| 🔄 账号切换 | 修复 Trae CN 路径探测、15 项指纹白名单、WAL/SHM 边车与锁清理、成功后回写 vault；长耗时 IO 移出 UI 线程 |
-| 📣 推送 | 内置飞书 / 钉钉 / 企业微信 / Telegram / 自定义 Webhook / 邮件六种渠道，另有系统通知；**签到结果目前由飞书自动推送，其余渠道可在设置页测试发送** |
-| 🎨 界面 | 明暗主题、运行日志页、四种登录方式、趋势图与账号切换联动、自绘外壳与动效 |
-| 🛡️ 自检 | 设置页新增「安全检查」：核对凭据是否加密落盘、加解密往返是否正常、有无明文残留 |
-| 📦 分发 | Windows 改为 NativeAOT 目录版整包（更新器整套替换而非只换 exe）；macOS 改为 .dmg |
-| 🧹 其他 | 修复每次启动误报「迁移 N 条记录」；快签 10 秒冷却；仪表盘积分按账号持久化；错误日志不再张冠李戴 |
+- **Windows**：双击 MSI，需要管理员权限；已装旧版会直接覆盖升级。免安装用户解压 zip 双击 `TraeTools.exe`，无需 .NET 运行时。
+- **macOS**：打开 dmg，把 App 拖进「应用程序」（**别在 dmg 里直接双击**，那样关掉就没了）。未做 Apple 公证，首次启动需放行一次：
 
-> 📖 1.4.x 那批问题的完整取证过程与验证方法见 [修复报告](修复报告-2026-10-25.md)。
+  ```bash
+  xattr -cr /Applications/TraeTools.app
+  ```
+
+  或在「系统设置 → 隐私与安全性」底部点「仍要打开」。放行只需一次。
+
+账号数据在用户目录（Windows `%APPDATA%\TraeTools`，macOS `~/Library/Application Support/TraeTools`），卸载不删除。
 
 ---
 
-## 🚀 Trae 一体化管理工具
+## 功能
 
-> Trae 多账号每日签到 · 云端自动签到 · 账号快速切换 · 用量统计
->
-> 一个工具覆盖 Trae 账号的「登录 → 签到 → 切换 → 用量查看 → 云端托管」全流程 💪
+- **每日签到**：多账号管理，一键签到全部启用账号；可设时间自动签到
+- **云端签到**：一键部署到自己的 GitHub fork，由 Actions 定时运行，不用开机；运行时间可自定义
+- **失败告警**：过了签到时间 10 分钟仍有账号未签，自动推送告警（含逐账号状态与处理建议）
+- **账号切换**：备份登录态后一键冷切换，失败自动回滚（**仅 Windows**）
+- **用量统计**：按会话展示模型 / Token / 缓存命中 / 积分消耗，含积分快过期提醒与过期日志
+- **推送渠道**：飞书、钉钉、企业微信、Telegram、自定义 Webhook、邮件，另支持系统通知
+- **网络代理**：全局代理，可按账号覆盖，便于多账号分流降风控
+- **主题 / 更新**：明暗跟随系统；内置检查更新与静默替换（失败回滚）
+- **安全检查**：一键核对凭据是否加密落盘、有无明文残留
 
-## ✨ 功能特性
+## 平台差异
 
-- 📅 **多账号每日签到**：一页管理多个 Trae 账号，一键签到全部启用账号；自动签到可设定时间，到点自动执行
-- ☁️ **云端签到（永不掉线）**：一键把签到任务部署到你自己的 GitHub fork（GitHub Actions 定时运行），无需电脑开机；**运行时间可自定义**
-- 🔄 **账号切换**：为每个账号备份登录态（vault），一键冷切换客户端账号，失败自动回滚（仅 Windows；macOS 版尚未开放，见「下载安装」末尾的差异说明）
-- 📊 **用量统计**：按会话展示模型 / 输入输出 Token / 缓存命中率 / 积分消耗，本地持久化；时间范围可选、按账号筛选，另有「积分快过期提醒」与**全账号积分过期日志**
-- 👤 **账号资料**：展示每个账号的昵称 / 脱敏手机号 / 头像 / 学生认证徽章
-- 📣 **多通道推送**：飞书 / 钉钉 / 企业微信 / Telegram / 自定义 Webhook / 邮件六种渠道，另支持本机系统通知；**签到结果目前自动推送飞书**，其余渠道可在设置页逐项测试发送
-- 🛡️ **安全检查**：设置页一键核对凭据是否加密落盘、加解密往返是否正常、配置里有无明文残留
-- 🎨 **明暗主题**：Light / Dark / 跟随系统三态
-- 🪜 **网络代理**：一键启用全局代理（签到 / 用量 / GitHub 接口与登录浏览器统一出口），支持按账号覆盖，多账号可分网降低风控关联
-- ⬆️ **自动更新**：内置检查更新与静默替换安装（Windows 换整套文件，macOS 换 .app bundle，失败自动回滚旧版）
-
-## 🖥️ 界面
-
-| 导航 | 说明 |
-|---|---|
-| 🏠 仪表盘 | 剩余积分、今日签到状态、积分趋势图、账号概览 |
-| 📊 用量统计 | 逐会话用量 + 模型分布 + 汇聚统计 + 积分过期日志，全部本地留档 |
-| 📅 每日签到 | 本月日历、连签天数、签到记录、一键/自动签到 |
-| 🔄 账号切换 | 建档（备份登录态）、一键切换、校验（仅 Windows） |
-| ☁️ 云端签到 | GitHub 授权、一键部署、部署状态与日志、签到时间自定义 |
-| 📜 运行日志 | 各模块日志可筛选、可复制，失败原因红字展示 |
-| ⚙️ 设置 | 自动签到配置、Token 信息、推送配置、网络代理、明暗主题、安全检查、账号管理、关于 |
-
-## 📥 下载安装（一步步来）
-
-到 [Releases](https://github.com/YYY2579/TraeTools/releases) 下载。
-
-### 第 1 步：选对包
-
-**Windows** 只有一个包，直接下载：
-
-| 包 | 平台 | 体积 |
+| 功能 | Windows | macOS |
 |---|---|---|
-| `TraeTools-win-x64.zip` | Windows 10/11 x64 | 约 63 MB |
+| 签到 / 用量 / 云端签到 / 推送 / 自动更新 | ✅ | ✅ |
+| 网络代理 | 全局 + 每账号，含登录浏览器 | 签到 / 用量 / GitHub 生效，登录浏览器不支持 |
+| 账号切换 | ✅ | ❌ 尚未开放 |
+| 凭据存储 | Windows DPAPI | AES-256-GCM + 本机密钥文件 |
 
-**macOS 有两个不同的程序**，先决定要哪个：
+两端都只在本机可解：把配置目录拷到另一台电脑会解不开，表现为需重新登录（属预期）。
 
-| | 🖥 **TraeTools**（完整窗口版） | ⚡ **TraeBar**（菜单栏轻量版） |
-|---|---|---|
-| 长什么样 | 有主窗口、有 Dock 图标，和 Windows 版一样的界面 | **没有窗口**，只在屏幕右上角菜单栏留一个 ⚡ 图标 |
-| 能做什么 | 签到 / 用量统计 / 云端签到 / 飞书 / 代理 / 自动更新 | 只做每日自动签到 + 显示剩余积分 |
-| 体积 | 约 54 MB | 约 0.2 MB |
-| 适合 | 想管多个账号、要看用量 | 只想后台把签到做掉，平时不打开 |
+---
 
-再按**芯片**选后缀 —— 不确定就点屏幕左上角苹果菜单  →「关于本机」，看「芯片」那一行：
+## 从源码运行
 
-| 你的 Mac | 选这个后缀 |
-|---|---|
-| Apple M1 / M2 / M3 / M4（"芯片 Apple M…"） | `-arm64` |
-| Intel（"处理器 Intel Core…"） | `-x64` |
-
-> 选错了不会坏，只是白占空间：Apple Silicon 上装 `-x64` 会走 Rosetta 转译，能跑但启动慢几秒。
-
-### 第 2 步：安装
-
-**Windows**：解压 zip 到任意文件夹，双击 `TraeTools.exe`。无需安装 .NET 运行时。
-
-**macOS**：双击 `.dmg` → 在弹出的窗口里把 App **拖到右边的 Applications 图标上** → 等进度条走完 → 右上角点「弹出」把 dmg 卸载掉。
-
-> ⚠️ **别在 dmg 里直接双击运行**。那样 App 还在只读镜像上，关掉就没了，也不会出现在「启动台」里。必须拖进 Applications。
->
-> 两个包可以同时要：`TraeTools.app` 和 `TraeBar.app` 是两个独立程序，互不干扰。
-
-### 第 3 步：首次打开（macOS 会拦一下，这是正常的）
-
-macOS 对**所有**未付费公证的网络下载软件都会拦，**不是包坏了**。二选一放行：
-
-1. **推荐**：在 Applications 里 **右键点 App → 选「打开」→ 再点「打开」**。只需这一次，之后正常双击。
-2. 或者终端执行（名字按你装的那个改）：
-   ```bash
-   xattr -cr /Applications/TraeTools.app   # 完整窗口版
-   xattr -cr /Applications/TraeBar.app     # 菜单栏轻量版
-   ```
-
-> ⚠️ `xattr -cr` 只是清掉系统的"下载隔离"标记，**它修不了任何真实故障**。如果放行之后还是打不开、或者打开就闪退，那是真问题，请开 Issue 并附上报错截图 —— 不要反复执行这条命令试图"修好"它。
-
-### 第 4 步：确认装对了
-
-- **TraeTools**：Dock 上出现青色 `T` 图标，屏幕顶部菜单栏应用名是 **TraeTools**，主窗口左侧有七个入口（仪表盘 / 用量统计 / 每日签到 / 账号切换 / 云端签到 / 运行日志 / 设置）。首次会先弹一个许可协议，勾选同意后进入主界面。
-- **TraeBar**：**双击后什么都不出现是正常的** —— 它设计上就没有窗口。去看屏幕**右上角菜单栏的 ⚡ 图标**，点它才出菜单。
-
-然后：`设置 → 账号管理 → ＋添加账号`，用手机号验证码登录，登录后点「每日签到 → 一键签到」验证。
-
-> 🔑 登录窗口会**自动抓取**会话 Cookie。如果它提示"未读到 X-Cloudide-Session"，说明这次登录只能撑约 8 小时 —— 关掉窗口重新登录一次通常就有了。
-
-### macOS 完整版与 Windows 的三处不同
-
-| 功能 | Windows | macOS 完整版 |
-|---|---|---|
-| 签到 / 用量统计 / 云端签到 / 飞书 / 自动更新 | ✅ | ✅ |
-| 🪜 网络代理 | 全局 + 每账号，**含登录内嵌浏览器** | 签到 / 用量 / GitHub / 飞书**照常生效**；⚠️ 登录浏览器不支持 |
-| 🔄 账号切换 | ✅ | ❌ **尚未开放** |
-
-- **代理**：macOS 的 WKWebView 没有可用的连接级代理入口（实测两种写法都不生效）。为避免"你以为这个账号走了独立代理、实际和其它账号同一个出口 IP"这种更危险的情况，登录时会**直接报错而不是静默直连**。需要分网的话，先用不带代理的网络完成一次登录，之后签到/用量的代理不受影响。
-- **账号切换**：该功能会改写 Trae 客户端自身的登录态文件，macOS 版尚未在真机上验证完成，因此当前版本不开放。已确认客户端数据在 mac 上的位置与 Windows 同构，实现进行中。
-- **凭据存储**：Windows 用系统 DPAPI；macOS 用 AES-256-GCM 加一个仅当前用户可读的机器密钥文件。两者都只在本机可解，把配置目录拷到另一台电脑都解不开（表现为需要重新登录，属预期）。
-
-> 所有 macOS 包都会先在 CI 的真实 macOS 机器上构建并跑一组契约验收（编译、登录宿主协议、凭据加密往返、开机自启 plist、更新换包与失败回滚、TLS 连通性），任一项不过就不出包。GUI 冒烟（真机启动、窗口出现）放在分支探路构建里跑，用于提前发现回归，不阻塞发版。
-
-## 🚀 快速开始
-
-### 方式一：直接使用
-在 [Releases](https://github.com/YYY2579/TraeTools/releases) 下载对应平台的包（Windows 需 .NET 9/10 桌面运行时已随包内置）。
-
-### 方式二：源码编译
-
-Windows 与 macOS 完整版共用同一份 C# 代码，需要 **.NET 10 SDK**：
+需要 .NET 10 SDK。
 
 ```bash
 git clone https://github.com/YYY2579/TraeTools.git
 cd TraeTools
-dotnet build -c Release
+dotnet build && dotnet run
 ```
 
-macOS 完整版还需要 Xcode Command Line Tools（登录内嵌浏览器是一个 Swift/AppKit 写的独立小宿主，见 `macos-loginhost/`）：
+打包：
 
 ```bash
-dotnet publish TraeTools.csproj -c Release -r osx-arm64 --self-contained true \
-  -p:PublishSingleFile=false -p:PublishTrimmed=false -o out-macos
-bash .github/build_login_host.sh arm64 out-macos
-VERSION="$(python3 -c "import json;print(json.load(open('version.json'))['version'])")"
-bash .github/pkg_dotnet_dmg.sh arm64 "$VERSION" out-macos
+# Windows 免安装整包（应用内更新器用的就是它）
+dotnet publish TraeTools.csproj -c Release -r win-x64 --self-contained true -p:EnableAot=true -o publish_aot
+
+# Windows 安装包（先装 WiX：dotnet tool install --global wix --version 5.0.2）
+wix build installer/TraeTools.wxs -arch x64 -d PublishDir=publish_aot -d ProductVersion=1.5.9 -o TraeTools-win-x64.msi
+
+# macOS 按架构编译
+dotnet publish TraeTools.csproj -c Release -r osx-arm64 --self-contained true   # Apple Silicon
+dotnet publish TraeTools.csproj -c Release -r osx-x64   --self-contained true   # Intel
 ```
 
-> 日常不需要本地编译：CI 会在每次推送和每次发版时构建并跑完验收，Releases 里直接下载即可。
+### 无界面自检
 
-菜单栏轻量版 TraeBar 是另一套 Swift 实现，在 [`macos`](https://github.com/YYY2579/TraeTools/tree/macos) 分支独立维护。
+不启动窗口也能验证关键链路，本地和 CI 都能跑：
 
-## 📖 使用指南
+```bash
+TraeTools --crypto-selftest        # 凭据加解密往返
+TraeTools --log-selftest           # 日志：内存缓冲 / 落盘 / 回填去重
+TraeTools --diagnose-selftest      # 云端失败原因归类
+TraeTools --switch-path-selftest   # 切换模块路径解析
+TraeTools --autostart-selftest     # 开机自启读写
+TraeTools --net-selftest           # TLS 信任链
+```
 
-### 1. 添加 / 登录账号
-`设置 → 账号管理 → + 添加`：自动打开登录窗口（内嵌浏览器），手机号+验证码登录后自动读取凭证并保存；登录态中的 JWT 仅约 **8 小时**有效，但会同时保存约 **14 天**有效的 `X-Cloudide-Session` 会话 Cookie，过期后用它一键静默续期。**若登录时未能保存 Session，8 小时后就必须重新登录**——登录窗口底部会明确提示是否成功抓到 Session。🔐
-
-### 2. 每日签到
-签到页点「一键签到」或开启「每日自动签到」；也可在仪表盘点「立即签到」。签到结果写入本地历史，日历与连签天数随之更新。命中 9074 风控时会自动换设备号重试 🛡️
-
-### 3. 用量统计
-进入「用量统计」页面自动同步近 7 天会话；每次会话展示模型、入/出 Token、缓存命中字节与积分消耗，数据按账号本地保留，可追溯历史趋势。
-
-### 4. 云端签到（部署到 GitHub Actions）
-1. `云端签到` 页点击「授权 GitHub」（设备码授权，无需密码；需要 repo + workflow 权限，用于写入 workflow 文件与 Secrets）
-2. 点击「一键部署到云端」：程序自动 fork 本仓库 → 写入每个账号的 `TRAE_SESSION` / `TRAE_DEVICE_ID` secret → 启用并触发验证运行
-3. 在「签到时间」卡片里设置想要的运行时刻（北京时间），点「应用到云端」即生效 ⏰
-4. 验证成功即生效：**每天到你设定的时间**自动签到，即使本机关机也不中断 ☁️
-
-部署原理：fork 仓库中的 `.github/workflows/checkin.yml` 定时运行 `checkin.py`，脚本用 `X-Cloudide-Session` 换取新 JWT 后调用签到接口（仅依赖 Python 标准库）。
-
-> 从旧版 TRAE-Checkin 迁移：已部署过旧 fork 的用户，在新版「重新部署」时会提示自动删除旧 fork 并重建，无需手动去网页操作。旧 fork 仓库可自行删除。
-
-### 5. 账号切换（仅 Windows）
-`账号切换` 页：为当前登录的客户端「建档」（备份登录态载体）→ 选择目标账号 → 「切换至此」一键冷切换；切换失败会自动回滚到原账号并重启客户端。账号删空后可直接「建档」输入新名称重新建立。
-
-> 🍎 macOS 上此功能尚未开放，原因见「下载安装」一节末尾的差异说明。
-
-## ❓ 常见问题
-
-| 现象 | 说明 / 处理 |
-|---|---|
-| 签到提示「当前参与用户太多」 | Trae 风控：同设备/网络频繁请求触发。新版已自动换设备号重试；仍失败建议错开高峰、减少账号数、不同账号用独立设备号 |
-| 云端部署 HTTP 401 | GitHub 授权失效或权限不足：点「重新授权」；仍失败则自动删除旧 fork 重建 |
-| 云端提示「未找到 workflow」 | 旧 fork 早于本仓库添加 checkin.yml：按提示一键「删除并重建 fork」即可自愈 |
-| 签到 0 积分 | 当日已签过（重复签到不加分），或非会员当日基础 150 分已到账 |
-| Token 失效 | 程序会用 `X-Cloudide-Session` 静默换新；彻底失效时提示重新登录 |
-| 重新登录窗口一闪而过？ | 已修复 ✅ 若仍遇到，说明网页里登录了别的账号，窗口会保持打开并红字提示，请退出后改用当前账号手机号登录 |
-| 🍎 双击 TraeBar 后什么都没出现？ | **正常**。TraeBar 是菜单栏应用，没有窗口也不显示 Dock 图标，去屏幕右上角菜单栏点 ⚡ 才出菜单。要完整界面请装 TraeTools macOS 版 |
-| 🍎 提示"已损坏 / 无法验证开发者"？ | macOS 对所有未公证的网络下载软件都这样，不是包坏了。按「下载安装 · 第 3 步」的放行方式处理即可 |
-
-> 云端签到凭证 `TRAE_SESSION` 有效期约 14 天。过期后只需在软件内重新登录；程序启动时会自动把新凭证同步到 GitHub Secret，无需重新部署。
-
-## 👨‍💻 开发者
-
-- 技术栈：Avalonia 12 / .NET 10 / CommunityToolkit.Mvvm / Sodium.Core；登录内嵌浏览器按平台各一个独立宿主进程 —— Windows 用 WebView2（`TraeTools.LoginHost/`，C#），macOS 用 WKWebView（`macos-loginhost/`，Swift）。两者只靠「命令行参数 + `--out` 回写 JSON」与主程序通信，主程序不关心宿主用什么语言写。菜单栏轻量版 TraeBar 为 Swift/AppKit，在 `macos` 分支
-- 目录：`ViewModels/` 页面逻辑、`Services/` 网络与领域服务、`Views/` 界面、`Models/` 数据模型
-- CI：`release.yml` 出三平台包，并用 `.github/verify_macos_artifacts.sh` 对 macOS 产物跑契约验收（登录宿主协议、凭据加密往返、开机自启、更新换包与回滚、TLS）；`macos-probe.yml` 额外跑真机启动、窗口出现等 GUI 冒烟。断言做过变异测试，确认没有"永远绿"的空检查
-- 行为默认不对外请求官方非公开接口之外的能力；用量/积分接口为逆向网页接口，字段随官方可能变化，代码均做容错解析
-
-## 🧾 项目说明
-
-### 每次发版前会自动跑什么
-
-macOS 包发布前，会在 GitHub 的真实 macOS 机器上跑这组契约验收，任一项不过就**不发布**：
-
-| 验收项 | 验的是什么 |
-|---|---|
-| 编译 + 产物存在 | 不是"日志没报错"，是真的要求二进制存在且能执行 |
-| 登录凭据捕获 | 用本地假 Trae 页端到端跑通「读 localStorage token → 校验账号归属 → 抓 session cookie → 回写」 |
-| 凭据加密往返 | 加密后必须能解回来；解不回来会表现为每次启动都要重新登录 |
-| 开机自启 | 生成的 plist 过 `plutil` 格式校验，且必须走 `open -a` 保住 bundle 身份 |
-| 应用内更新 | 7 个场景，含**放入失败必须回滚**、目录不可写必须零改动、缺登录宿主的包必须拒绝安装 |
-| TLS 连通性 | 真实握手到 api.trae.cn（连不上与验不过分开判定） |
-
-> 「真机启动并确认窗口出现」「重复启动」这类 GUI 冒烟依赖窗口服务器时序，放在 `macos-probe.yml` 的探路构建里跑，只预警、不阻塞发版。
-
-Windows 与 TraeBar 走各自的构建作业，同样在发版流水线里。
-
-### ⚠️ 这个工具的真实脆弱点
-
-**用量统计、积分、签到走的都是逆向来的 Trae 网页接口，不是官方公开 API。** 官方一改字段或路径，表现就是"签到突然失败""用量页空白"，而软件**不会收到任何预警**。
-
-所以：
-
-- 建议**在设置里配置飞书推送**（签到结果会自动推送到飞书）。接口一变，签到失败会实时通知你，而不是几周后才发现日历上有一片空洞。
-- 遇到问题请先看**运行日志**页，那里记录了失败原因（token 过期 / 风控 / 接口异常），截图贴进 Issue 会快很多。
-- 会话 Cookie 约 14 天有效。**这不是 Bug，是 Trae 的机制** —— 到期需要你在软件内重新登录一次；启动时会自动同步新凭证到云端，无需重新部署。
-
-### 凭证安全
-
-- 本地凭据用平台加密机制存储（Windows DPAPI / macOS AES-256-GCM + 仅当前用户可读的密钥文件），**只在本机可解**；把配置目录拷到另一台电脑会解不开，表现为需要重新登录。
-- 云端签到时，会话凭据以 libsodium 密封后存入你自己 fork 的 GitHub Secrets，不经过本项目任何第三方服务。
-- 本项目不请求 Trae 官方接口之外的能力，所有解析都做了容错。
-
-### 反馈
-
-有问题、有报错、想要某功能 —— 直接开 [Issue](https://github.com/YYY2579/TraeTools/issues)，附上**运行日志页的相关条目**和平台/版本（左下角有版本号）。
-
-## ⚠️ 免责声明
-
-- 本项目为个人开源工具，与 ByteDance / Trae 官方无任何关系
-- 使用自动签到、账号切换等功能请遵守 Trae 服务条款，风险自负
-- 请勿出售、外借或用于非法用途；账号凭证仅保存在你自己的电脑/GitHub secret 中
-
-## 💬 作者的话
-
-**我是个不懂代码的小白**，这个项目全程是我和 AI 一起做的 —— 我提需求、描述现象，代码由 AI 写。
-所以某一段实现在干什么我看不懂，也不会手写补丁。
-
-发版前有 CI 在真实 macOS 机器上自动跑契约验收（能不能编译、登录能不能抓到凭据、更新失败会不会回滚等），
-不过就不出包；窗口能不能正常出现这类 GUI 冒烟在分支探路构建里单独跑。**但这套验收只管 macOS**，Windows 那边改坏了它拦不住，
-动 Windows 代码的朋友请自己多留个心，也欢迎顺手帮我把 Windows 的验收补上。
-
-### 适合谁用
-
-**适合想开箱即用、不想折腾的人。** 下载、拖进 Applications、登录，然后每天它自己签到，
-你不用管它。云端部署配好之后连电脑都不用开。
-
-如果你想要别的功能，欢迎自己 fork 拿去喂 AI 二开 —— 代码是普通的 C#/.NET + Avalonia，
-AI 改起来没什么障碍，仓库里还留了 [修复报告](修复报告-2026-10-25.md) 和验收脚本，改完能自己验证。
-GPL v3，改完记得开源就行。
-
-### 有问题告诉我
-
-- **用不了、报错了** → 开个 [Issue](https://github.com/YYY2579/TraeTools/issues)，
-  顺手带上「运行日志」页的相关条目和左下角的版本号。报错代码我看不懂，
-  但日志里写的现象我读得懂。
-- **加了觉得好用的功能** → 欢迎提 PR，哪怕是你和 AI 一起弄的，没关系。
-
-### 谢谢
-
-谢谢 [star620](https://github.com/star620) 开源前身项目，谢谢 TRAE-Checkin 和 Trea-Switch
-的作者们，也谢谢每一个提 Issue、提 PR、帮我纠错的人。
-没有这些开源项目，这东西做不出来 🙇
-
-## 📚 项目来源
-
-- [star620/TraeTools](https://github.com/star620/TraeTools)：本项目的前身（TRAE-Checkin + Trea-Switch 的整合重构版），本仓库在其基础上二次开发
-- [TRAE-Checkin](https://github.com/star620/TRAE-Checkin)：云端签到体系（checkin.py + GitHub Actions 流程）源自该仓库
-- [Trea-Switch](https://github.com/star620/Trea-Switch)：账号切换（vault 建档 / 冷切换 / 守护回滚）能力源自该仓库
-- [Avalonia](https://avaloniaui.net/)：让同一套界面代码能同时跑在 Windows 与 macOS 上，
-  这是 macOS 版能以"移植"而不是"重写"的方式做出来的根本原因
-- 开发方式：由不懂代码的作者与 AI 协作完成；macOS 侧有自动化验收脚本把关（见「项目说明」）
-
-## 📄 许可证
-
-[GPL v3](LICENSE) —— 二开与分发请遵循同许可证。
+`--notify-selftest` 会用环境变量里的 SMTP 配置真实发一封告警邮件（凭据不落盘、不进仓库），变量：`TTSMTP_HOST` / `TTSMTP_PORT` / `TTSMTP_SEC` / `TTSMTP_USER` / `TTSMTP_PASS` / `TTSMTP_TO`。
 
 ---
 
-<div align="center">
+## 常见问题
 
-**觉得好用就点个 Star ⭐ 吧～ 感谢每一位支持的朋友 🎉✨**
+**签到报 9074「参与用户太多」**
+设备号被风控。设置页「更换设备号」后重试；云端签到需重新部署。
 
-</div>
+**签到报「会话失效」**
+Session 约 14 天过期。重新登录 Trae；云端还需再点一次「重新部署」把新 Session 写回 Secret。
+
+**云端定时任务没跑或失败**
+到 fork 仓库的 Actions 页看日志。常见原因是 Session 过期或整点高峰风控，可错开时间、减少云端账号数。
+
+**为什么没收到失败通知**
+检查设置页各渠道开关。失败告警不受「签到完成后推送」总开关限制，但需要至少启用一个渠道（或打开系统通知）。
+
+**macOS 提示「已损坏，无法打开」**
+未公证导致，按上面的 `xattr -cr` 放行即可，文件没坏。
+
+---
+
+## 开发者
+
+- 技术栈：Avalonia 12 / .NET 10 / CommunityToolkit.Mvvm / Sodium.Core
+- 登录宿主按平台各一个独立进程：Windows 用 WebView2（`TraeTools.LoginHost/`，C#），macOS 用 WKWebView（`macos-loginhost/`，Swift）。两者只通过「命令行参数 + `--out` 回写 JSON」与主程序通信
+- 目录：`ViewModels/` 页面逻辑 · `Services/` 网络与领域服务 · `Views/` 界面 · `Models/` 数据模型 · `installer/` Windows MSI 定义
+- Windows 与 macOS 共用同一份代码、按 RID 编译，平台差异用 `OperatingSystem.IsWindows()` 分支
+- 菜单栏轻量版 TraeBar 为 Swift/AppKit，在 `macos` 分支，与主项目独立发布
+- 发布：`release.yml` 出三平台产物（Windows MSI + zip、macOS 双架构 dmg、TraeBar），macOS 另跑契约验收（登录宿主协议、加密往返、自启、更新换包回滚、TLS）
+
+> 注意：Avalonia 桌面版的 macOS 编译目前只在发版流水线做，`ci.yml` 的 mac 任务只编 TraeBar。改跨平台代码后建议本地先 `dotnet build -r osx-arm64`，或跑一次「只构建不发布」的发版空跑。
+
+---
+
+## 免责声明
+
+- 个人开源项目，与 ByteDance / Trae 官方无关
+- 使用签到、账号切换等功能请遵守 Trae 服务条款，风险自负
+- 请勿出售、外借或用于非法用途；凭证只保存在你自己的电脑与 GitHub Secret 中
+
+---
+
+## 关于作者
+
+**我不懂代码，这个项目是我和 AI 一起做的** —— 我提需求、描述现象，代码由 AI 写。
+
+所以：**欢迎自己 fork 下来喂给 AI 二开**。普通 C#/.NET + Avalonia，AI 改起来没什么障碍；仓库里留了自检脚本与验收脚本，改完能自己验证。GPL v3，改完记得开源。
+
+用不了、报错了 → 提 [Issue](https://github.com/YYY2579/TraeTools/issues)，带上「运行日志」页的相关条目和左下角版本号。加了觉得好用的功能 → 欢迎提 PR，哪怕是你和 AI 一起弄的。
+
+谢谢 [star620](https://github.com/star620) 开源前身项目，谢谢 TRAE-Checkin、Trea-Switch 的作者，也谢谢每一个提 Issue、提 PR、帮我纠错的人。
+
+## 许可证
+
+GPL v3，见 [LICENSE](LICENSE)。

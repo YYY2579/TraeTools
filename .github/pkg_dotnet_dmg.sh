@@ -15,6 +15,9 @@ PUBLISH_DIR="${3:-out-macos}"
 
 LABEL="$ARCH"
 [ "$ARCH" = "x86_64" ] && LABEL="x64"
+# 卷名用人类可读的芯片名，用户在访达/磁盘工具里一眼能看出装的是哪个架构
+CHIP="Apple Silicon"
+[ "$ARCH" = "x86_64" ] && CHIP="Intel"
 APP=TraeTools.app
 BIN_DIR="$APP/Contents/MacOS"
 
@@ -124,7 +127,7 @@ macOS 会拦截一切从网络下载的未公证软件，这与软件本身无�
 之后即可正常双击使用。本版本是完整窗口应用（有 Dock 图标），
 与菜单栏常驻的 TraeBar 是两个不同的程序，可同时安装。
 READMEE
-hdiutil create -volname "TraeTools ${LABEL}" -srcfolder dmg-stage -ov -format UDZO "TraeTools-macos-${LABEL}.dmg"
+hdiutil create -volname "TraeTools (${CHIP})" -srcfolder dmg-stage -ov -format UDZO "TraeTools-macos-${LABEL}.dmg"
 
 # 保留 .app 供后续冒烟测试从包内启动；只清中间产物。
 rm -rf dmg-stage AppIcon.iconset icon_1024.png make_icon.swift AppIcon.icns
