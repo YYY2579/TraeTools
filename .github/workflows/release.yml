@@ -261,6 +261,7 @@ jobs:
           name: "TraeTools ${{ github.ref_name }}"
           body_path: release_notes.md
           files: |
+            dist/TraeTools-win-x64.msi
             dist/TraeTools-win-x64.zip
             dist/TraeTools.exe
             dist/TraeTools.LoginHost.exe
