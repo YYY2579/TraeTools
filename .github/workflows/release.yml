@@ -72,7 +72,14 @@ jobs:
           dotnet tool install --global wix --version 5.0.2
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
           $ver = (Get-Content version.json -Raw | ConvertFrom-Json).version
-          wix build installer/TraeTools.wxs -arch x64 -d PublishDir=publish_aot -d ProductVersion=$ver -o TraeTools-win-x64.msi
+          # PublishDir 必须传绝对路径：WiX v4+ 把相对路径解析为「.wxs 文件所在目录」
+          # （installer/publish_aot 不存在），收割 0 个文件只报 warning 不报 error，
+          # 产出一个只有快捷方式壳的空 MSI（v1.6.0 实际翻车案例，本地已用 WIX8601 复现）。
+          wix build installer/TraeTools.wxs -arch x64 -d "PublishDir=$env:GITHUB_WORKSPACE\publish_aot" -d ProductVersion=$ver -o TraeTools-win-x64.msi
+          # 尺寸门禁：AOT 整包 payload 压进 cab 后至少几十 MB；
+          # 空壳 MSI 约 0.2MB，低于阈值直接失败，不让坏安装包流进 Release。
+          $msi = Get-Item TraeTools-win-x64.msi
+          if ($msi.Length -lt 30MB) { throw "MSI 仅 $($msi.Length) 字节，疑似空包（未收割到应用文件），禁止发布" }
           Get-Item TraeTools-win-x64.msi | Select-Object Name, Length
 
       - name: Upload Windows packages

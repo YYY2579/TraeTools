@@ -38,14 +38,18 @@ jobs:
           Compress-Archive -Path publish_aot\* -DestinationPath TraeTools-win-x64.zip -Force
           Get-ChildItem TraeTools-win-x64.zip | Select-Object Name, Length
 
-      # MSI 定义改了要能当场发现：WiX 语法错只会在构建时报，不会在 dotnet build 报
+      # MSI 定义改了要能当场发现：WiX 语法错只会在构建时报，不会在 dotnet build 报。
+      # PublishDir 必须绝对路径（WiX v4+ 相对路径按 .wxs 所在目录解析，会静默收割空包，
+      # 见 release.yml 同名步骤的注释）；再加尺寸门禁，空壳 MSI 直接失败。
       - name: Build MSI (validates installer/TraeTools.wxs)
         shell: pwsh
         run: |
           dotnet tool install --global wix --version 5.0.2
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
           $ver = (Get-Content version.json -Raw | ConvertFrom-Json).version
-          wix build installer/TraeTools.wxs -arch x64 -d PublishDir=publish_aot -d ProductVersion=$ver -o TraeTools-win-x64.msi
+          wix build installer/TraeTools.wxs -arch x64 -d "PublishDir=$env:GITHUB_WORKSPACE\publish_aot" -d ProductVersion=$ver -o TraeTools-win-x64.msi
+          $msi = Get-Item TraeTools-win-x64.msi
+          if ($msi.Length -lt 30MB) { throw "MSI 仅 $($msi.Length) 字节，疑似空包（未收割到应用文件）" }
           Get-Item TraeTools-win-x64.msi | Select-Object Name, Length
 
       # 无界面自检：直接跑将要发布的 AOT 产物，避免"bin 能过、发布物不能跑"。
