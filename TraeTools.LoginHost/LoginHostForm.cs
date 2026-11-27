@@ -314,7 +314,7 @@ public sealed class LoginHostForm : Form
                         _btnAdoptUid.Visible = true;
                         _btnAdoptUid.Enabled = true;
                     }
-                    SetStatus($"⚠ 页面登录 uid={uid}，与账号记录（{_expectedUid}）不符。若这是你的账号（平台更换过 uid），点上方「采用新 uid 继续」；否则请退出后改用当前账号的手机号登录。", Color.Firebrick);
+                    SetStatus($"⚠ 页面登录 uid={uid}，与账号记录（{_expectedUid}）不符。请确认这是否你的账号：是（平台更换过 uid）就点上方「采用新 uid 继续」；否则请退出登录，改用当前账号的手机号登录。", Color.Firebrick);
                     return;
                 }
                 else

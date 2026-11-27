@@ -280,7 +280,7 @@ final class HostController: NSObject, NSWindowDelegate, WKNavigationDelegate {
                 if token == pendingToken { return }   // 同一 token 已在等确认，别重复刷状态
                 pendingToken = token
                 adoptButton.isHidden = false
-                setStatus("⛔ 页面登录 uid=\(uid!)，与账号记录（\(expected)）不符。若这是你的账号（平台更换过 uid），点下方「采用新 uid 继续」；否则请退出后改用当前账号手机号登录。", .systemRed)
+                setStatus("⛔ 页面登录 uid=\(uid!)，与账号记录（\(expected)）不符。请确认这是否你的账号：是（平台更换过 uid）就点下方「采用新 uid 继续」；否则请退出登录，改用当前账号手机号登录。", .systemRed)
                 return
             } else {
                 // 登回正确账号：清掉等待确认状态
