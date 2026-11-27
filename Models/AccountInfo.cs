@@ -48,6 +48,18 @@ public partial class AccountInfo : ObservableObject
     [ObservableProperty]
     private bool _isCurrent;
 
+    /// <summary>用户自定义备注（仅本地保存，不上传服务端）。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasRemark))]
+    private string _remark = string.Empty;
+    /// <summary>备注是否有内容（卡片备注行显示开关）。</summary>
+    public bool HasRemark => !string.IsNullOrWhiteSpace(Remark);
+    /// <summary>备注编辑草稿（弹层输入框双向绑定）。</summary>
+    [ObservableProperty]
+    private string _remarkDraft = string.Empty;
+    /// <summary>保存备注命令（读 RemarkDraft 草稿；实现由 DashboardViewModel 注入）。</summary>
+    public ICommand? SaveRemarkCommand { get; set; }
+
     /// <summary>该账号剩余积分（-1 = 尚未刷新过，界面显示「—」而不是误导性的 0）。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CreditsText))]

@@ -10,6 +10,11 @@ public class TraeAccount
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     /// <summary>用户备注名（如「主号 / 小号」）；为空时 UI 显示「账号 n」。</summary>
     public string? Name { get; set; }
+    /// <summary>
+    /// 用户自定义备注（仅保存在本机 config.json，**不上传服务端**），
+    /// 用于区分「用户8528184254」这类默认名称易混淆的账号。
+    /// </summary>
+    public string Remark { get; set; } = "";
     /// <summary>JWT（约 8 小时，失效时用 Session 静默换新）。</summary>
     public string? Token { get; set; }
     /// <summary>X-Cloudide-Session 会话 Cookie 值（约 14 天）。</summary>

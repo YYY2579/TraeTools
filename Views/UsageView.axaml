@@ -38,10 +38,20 @@
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                     <TextBlock Text="{Binding StatusMessage}" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" />
+                    <!-- 保活专用状态条：处理中蓝 / 成功绿 / 失败红，不被「拉取用量」等动作覆盖 -->
+                    <TextBlock Text="{Binding KeepAliveStatusText}" FontSize="12" MaxWidth="300" TextWrapping="Wrap"
+                               VerticalAlignment="Center" IsVisible="{Binding KeepAliveIsRunning}"
+                               Foreground="{DynamicResource AccentBrush}" />
+                    <TextBlock Text="{Binding KeepAliveStatusText}" FontSize="12" MaxWidth="300" TextWrapping="Wrap"
+                               VerticalAlignment="Center" IsVisible="{Binding KeepAliveIsOk}"
+                               Foreground="{DynamicResource SuccessBrush}" />
+                    <TextBlock Text="{Binding KeepAliveStatusText}" FontSize="12" MaxWidth="300" TextWrapping="Wrap"
+                               VerticalAlignment="Center" IsVisible="{Binding KeepAliveIsFail}"
+                               Foreground="{DynamicResource DangerBrush}" />
                     <TextBlock Text="范围" FontSize="12" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" />
                     <ComboBox SelectedItem="{Binding FetchDays}" ItemsSource="{Binding FetchDayOptions}" Width="90"
                               HorizontalContentAlignment="Center" />
-                    <Button Classes="btn" Content="保活" ToolTip.Tip="手动发送一条测试消息（你好）保持账号活跃；默认模型 deepseek_v4_1_flash_1017，不自动执行"
+                    <Button Classes="btn" Content="{Binding KeepAliveButtonText}" ToolTip.Tip="手动发送一条测试消息（你好）保持账号活跃；默认模型 deepseek_v4_1_flash_1017，不自动执行"
                             Command="{Binding KeepAliveCommand}" IsEnabled="{Binding !IsKeepAliveRunning}" />
                     <Button Classes="btn-primary" Content="拉取用量" Command="{Binding RefreshCommand}"
                             IsEnabled="{Binding !IsLoading}" />

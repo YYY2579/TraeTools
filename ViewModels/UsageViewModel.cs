@@ -47,7 +47,29 @@ public partial class UsageViewModel : ViewModelBase
 
     /// <summary>保活是否进行中（防止重复发送测试消息）。</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(KeepAliveButtonText))]
     private bool _isKeepAliveRunning;
+
+    /// <summary>保活结果反馈文字（独立于拉取用量的 StatusMessage，不会被其它动作覆盖）。</summary>
+    [ObservableProperty]
+    private string _keepAliveStatusText = "";
+
+    /// <summary>保活状态：idle / running / ok / fail（驱动状态条颜色与可见性）。</summary>
+    [ObservableProperty]
+    private string _keepAliveState = "idle";
+
+    public bool KeepAliveIsRunning => KeepAliveState == "running";
+    public bool KeepAliveIsOk => KeepAliveState == "ok";
+    public bool KeepAliveIsFail => KeepAliveState == "fail";
+    /// <summary>按钮文字：进行中显示「保活中…」防重复点击。</summary>
+    public string KeepAliveButtonText => IsKeepAliveRunning ? "保活中…" : "保活";
+
+    partial void OnKeepAliveStateChanged(string value)
+    {
+        OnPropertyChanged(nameof(KeepAliveIsRunning));
+        OnPropertyChanged(nameof(KeepAliveIsOk));
+        OnPropertyChanged(nameof(KeepAliveIsFail));
+    }
 
     /// <summary>账号筛选当前值："全部账号" 或具体账号名。</summary>
     [ObservableProperty]
@@ -319,39 +341,53 @@ public partial class UsageViewModel : ViewModelBase
     [RelayCommand]
     private async Task KeepAlive()
     {
-        if (IsKeepAliveRunning) { StatusMessage = "保活进行中，请稍候"; return; }
+        if (IsKeepAliveRunning) { KeepAliveStatusText = "保活进行中，请稍候"; return; }
 
         var cfg = MainViewModel.AppConfig;
         var acc = cfg?.Accounts.FirstOrDefault(a => a.Id == cfg.ActiveAccountId)
                   ?? cfg?.Accounts.FirstOrDefault();
         if (acc == null || string.IsNullOrEmpty(acc.Token))
         {
-            StatusMessage = "未找到带登录凭证的账号";
+            KeepAliveState = "fail";
+            KeepAliveStatusText = "✗ 未找到带登录凭证的账号";
             return;
         }
 
         var accName = string.IsNullOrEmpty(acc.Name) ? (acc.Id.Length > 6 ? acc.Id[..6] : acc.Id) : acc.Name!;
         IsKeepAliveRunning = true;
-        StatusMessage = "正在发送测试消息…";
+        KeepAliveState = "running";
+        KeepAliveStatusText = "正在发送测试消息（你好）… 请稍候";
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             if (!await AccountHelpers.EnsureValidTokenAsync(acc) || string.IsNullOrEmpty(acc.Token))
             {
-                StatusMessage = "Token 已失效且无法换新，请重新登录";
+                KeepAliveState = "fail";
+                KeepAliveStatusText = "✗ Token 已失效且无法换新，请重新登录";
                 AccountHelpers.AppLog("usage", accName, "保活失败：Token 不可用");
                 return;
             }
 
             var client = new KeepAliveClient(AccountHelpers.ResolveProxy(acc));
             var (ok, detail) = await client.SendTestMessageAsync(acc.Token);
-            StatusMessage = ok
-                ? $"保活完成：已发送测试消息（{detail}）"
-                : "保活失败：" + detail;
-            AccountHelpers.AppLog("usage", accName, ok ? "保活完成（消息内容不入日志）" : "保活失败：" + detail);
+            sw.Stop();
+            if (ok)
+            {
+                KeepAliveState = "ok";
+                KeepAliveStatusText = $"✓ 保活成功：{detail}，耗时 {sw.Elapsed.TotalSeconds:0.0}s，账号活跃度已刷新";
+                AccountHelpers.AppLog("usage", accName, "保活完成（消息内容不入日志）");
+            }
+            else
+            {
+                KeepAliveState = "fail";
+                KeepAliveStatusText = "✗ 保活失败：" + detail;
+                AccountHelpers.AppLog("usage", accName, "保活失败：" + detail);
+            }
         }
         catch (Exception ex)
         {
-            StatusMessage = "保活异常：" + ex.Message;
+            KeepAliveState = "fail";
+            KeepAliveStatusText = "✗ 保活异常：" + ex.Message;
             AccountHelpers.AppLog("usage", accName, "保活异常：" + ex.Message);
         }
         finally

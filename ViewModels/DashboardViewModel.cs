@@ -416,6 +416,8 @@ public partial class DashboardViewModel : ViewModelBase
                     {
                         Id = acc.Id,
                         Name = name,
+                        Remark = acc.Remark ?? "",
+                        RemarkDraft = acc.Remark ?? "",
                         Initial = name.Length > 0 ? name[0].ToString() : "?",
                         Color = colors[idx % colors.Length],
                         // 各账号自己的剩余积分（-1 时界面显示「—」，不伪装成 0 分）
@@ -427,6 +429,9 @@ public partial class DashboardViewModel : ViewModelBase
                     // 点击账号概览卡片 → 全局切换账号（仪表盘/用量页跟随）
                     var accountId = acc.Id;
                     info.SelectCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(() => SelectAccount(accountId));
+                    // 保存备注（读卡片草稿；仅写本地 config.json，不上传）
+                    var card = info;
+                    info.SaveRemarkCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(() => SaveRemark(accountId, card.RemarkDraft));
                     Accounts.Add(info);
                     // 同步头部展示的当前账号（含头像加载）
                     if (info.IsCurrent)
@@ -445,6 +450,21 @@ public partial class DashboardViewModel : ViewModelBase
             HasCurrentAccount = false;
         }
         catch { /* 加载失败保持空列表 */ }
+    }
+
+    /// <summary>保存账号备注（仅写本地 config.json，不上传服务端；空串 = 清除备注）。</summary>
+    private void SaveRemark(string accountId, string draft)
+    {
+        try
+        {
+            var cfg = MainViewModel.AppConfig;
+            var acc = cfg?.Accounts.FirstOrDefault(a => a.Id == accountId);
+            if (acc == null) return;
+            acc.Remark = (draft ?? "").Trim();
+            cfg!.Save();
+            PopulateAccounts();   // 重建卡片，刷新备注显示
+        }
+        catch { /* 保存失败静默，下次编辑可重试 */ }
     }
 
     /// <summary>全局切换账号（仪表盘/用量统计/签到等跟随）。</summary>
