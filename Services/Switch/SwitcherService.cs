@@ -178,6 +178,7 @@ public sealed class SwitcherService(string rootDir, VaultService vault, IClientC
     {
         await Task.Run(() => client.KillAll());
         await Task.Delay(400);   // 等文件句柄释放，避免新实例读到半关闭的旧库
+        ProfileIsolation.EnsureAiAgentLink(profileDir);   // 档案缺聊天数据联接时自愈（幂等）
 
         var storage = AuthProbe.StoragePath(profileDir);
         var expected = AuthProbe.IdentityHash(storage);

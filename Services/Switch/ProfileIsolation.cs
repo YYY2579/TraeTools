@@ -13,6 +13,49 @@ public static class ProfileIsolation
     /// <summary>所有账号数据目录的根：%APPDATA%\TraeTools\switch\profiles。</summary>
     public static string ProfilesRoot => Path.Combine(TraeTools.Services.DataPaths.SwitchDir, "profiles");
 
+    /// <summary>
+    /// AI 聊天/会话数据的跨档案共享根（junction/symlink 的目标）。
+    /// 聊天库（database.db）与项目快照和登录态无关，跨档案共享后切换账号聊天记录连续，
+    /// 消除「切换账号后聊天记录消失」的割裂感。
+    /// </summary>
+    public static string SharedAiAgentRoot => Path.Combine(TraeTools.Services.DataPaths.SwitchDir, "shared", "ai-agent");
+
+    /// <summary>
+    /// 确保某客户端数据目录的 ModularData\ai-agent 指向共享根。
+    /// Windows 用 NTFS junction（无需管理员），macOS 用符号链接。
+    /// 已是联接 → 放行；是实体目录 → 跳过不动（绝不删用户数据，如需并入共享请手动迁移）；
+    /// 不存在 → 建联接（共享根为空时客户端会在其中自行初始化）。
+    /// 失败不影响切换本身，只是该档案暂时看不到共享聊天记录。
+    /// </summary>
+    public static void EnsureAiAgentLink(string dataDir)
+    {
+        try
+        {
+            var mod = Path.Combine(dataDir, "ModularData");
+            Directory.CreateDirectory(mod);
+            var link = Path.Combine(mod, "ai-agent");
+            if (Directory.Exists(link))
+            {
+                if ((File.GetAttributes(link) & FileAttributes.ReparsePoint) != 0) return;   // 已是联接
+                return;                                                                     // 实体目录：不动
+            }
+            Directory.CreateDirectory(SharedAiAgentRoot);
+            if (OperatingSystem.IsWindows())
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo(
+                    "cmd.exe", "/c mklink /J \"" + link.TrimEnd('\\') + "\" \"" + SharedAiAgentRoot.TrimEnd('\\') + "\"")
+                { CreateNoWindow = true, UseShellExecute = false };
+                using var p = System.Diagnostics.Process.Start(psi);
+                p?.WaitForExit(5000);
+            }
+            else
+            {
+                Directory.CreateSymbolicLink(link, SharedAiAgentRoot);
+            }
+        }
+        catch { /* 联接失败不影响切换，只是该档案暂时看不到共享聊天记录 */ }
+    }
+
     /// <summary>某账号的数据目录（目录内即客户端数据根，直接传 --user-data-dir）。</summary>
     public static string ProfileDir(string account) => Path.Combine(ProfilesRoot, VaultService.Sanitize(account));
 
@@ -63,6 +106,7 @@ public static class ProfileIsolation
         Directory.CreateDirectory(dir);
         File.WriteAllText(ManifestPath(account),
             AppJsonIndented.Serialize(new ProfileManifest(account, DateTime.UtcNow.ToString("o"), 0, "")));
+        EnsureAiAgentLink(dir);   // 新档案直接挂共享聊天数据
     }
 
     /// <summary>
@@ -97,6 +141,7 @@ public static class ProfileIsolation
         var manifest = new ProfileManifest(account, DateTime.UtcNow.ToString("o"), count,
             Sha256(newId));
         File.WriteAllText(ManifestPath(account), AppJsonIndented.Serialize(manifest));
+        EnsureAiAgentLink(dir);   // 复制流程排除了 ModularData（大目录），这里挂共享聊天数据
         return count;
     }
 
