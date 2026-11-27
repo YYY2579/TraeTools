@@ -303,3 +303,38 @@ jobs:
             dist/TraeBar-macos-arm64.dmg
             dist/TraeBar-macos-x64.dmg
           generate_release_notes: false
+
+      # 每次发版成功后自动把 main 上的版本号 patch +1（[skip ci] 防循环）。
+      # 下次发版只需打 tag = main 当前 version.json 的值，不再手动改版本号。
+      # 以 main 最新为基准 +1（而非 tag 上的版本）；并发提交竞态用三次重试兜底，
+      # 全部失败则告警放行——Release 已发布成功，版本号下次手动补即可。
+      - name: Auto bump version for next release
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.publish == 'true'
+        run: |
+          set -e
+          ok=0
+          for i in 1 2 3; do
+            git fetch origin main
+            git checkout -B autobump origin/main
+            BASE=$(python3 -c "import json;print(json.load(open('version.json'))['version'])")
+            IFS='.' read -r MA MI PA <<< "$BASE"
+            NEXT="$MA.$MI.$((PA + 1))"
+            export NEXT
+            python3 - <<'PY'
+            import json, os, datetime
+            v = json.load(open('version.json'))
+            v['version'] = os.environ['NEXT']
+            v['buildDate'] = datetime.date.today().isoformat()
+            json.dump(v, open('version.json', 'w'), indent=2, ensure_ascii=False)
+            PY
+            git config user.name "YYY2579"
+            git config user.email "YYY2579@users.noreply.github.com"
+            git add version.json
+            git commit -m "chore(release): 版本号自动递增到 $NEXT [skip ci]"
+            if git push origin HEAD:main; then echo "版本号已自动递增到 $NEXT"; ok=1; break; fi
+            echo "第 $i 次推送失败（可能有并发提交），重试…"
+            sleep 5
+          done
+          if [ "$ok" != "1" ]; then
+            echo "::warning::版本号自动递增失败（三次重试均失败），下次发版前请手动把 version.json patch +1"
+          fi
