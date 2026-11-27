@@ -77,6 +77,7 @@ internal sealed partial class CompactJsonContext : JsonSerializerContext
 [JsonSerializable(typeof(AppConfig))]
 [JsonSerializable(typeof(AppSettingsData))]
 [JsonSerializable(typeof(VaultMeta))]
+[JsonSerializable(typeof(ProfileIsolation.ProfileManifest))]
 // DataPaths.Migrate 需要把合并后的 JsonObject 缩进写回（旧 config 合并路径）
 [JsonSerializable(typeof(System.Text.Json.Nodes.JsonObject))]
 // ===== 本次 PR 追加：账号备份文件的容器 =====

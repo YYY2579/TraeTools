@@ -613,6 +613,9 @@ public partial class CheckinViewModel : ViewModelBase
                     if (a == null || a.Enabled == c.IsChecked) return;
                     a.Enabled = c.IsChecked;
                     try { MainViewModel.AppConfig?.Save(); } catch { /* 忽略 */ }
+                    // 勾选变化立刻重算按钮可用性：否则"只勾一个签完"后按钮一直是灰的，
+                    // 再改勾别的账号也点不动。
+                    RefreshTodayState();
                 };
                 CheckAccounts.Add(item);
             }
@@ -710,8 +713,11 @@ public partial class CheckinViewModel : ViewModelBase
                 return;
             }
 
-            // 一键签到 vs 今日已签：任一账号未签则允许点击（CheckedInToday=false）
-            bool allChecked = accounts.All(a => a.LastCheckinDate.HasValue && a.LastCheckinDate.Value.Date == DateTime.Today);
+            // 只看「已勾选」的账号：勾谁签谁，不能拿没勾选的账号把按钮卡成灰。
+            // 之前用 accounts.All(...) —— 只勾一个签完后，其余未勾账号没签，条件却仍是 true，按钮永久灰。
+            var enabledAccs = accounts.Where(a => a.Enabled).ToList();
+            bool allChecked = enabledAccs.Count > 0
+                && enabledAccs.All(a => a.LastCheckinDate.HasValue && a.LastCheckinDate.Value.Date == DateTime.Today);
             CheckedInToday = allChecked;
 
             // 今日奖励：统计所有账号今日实际获得的总积分

@@ -5,7 +5,7 @@ namespace TraeSwitch.Services;
 public interface IClientController
 {
     void KillAll();
-    void Launch();
+    void Launch(string? userDataDir = null);
     bool IsRunning();
 }
 
@@ -150,7 +150,7 @@ public sealed class ClientController : IClientController
         try { return $"{p.ProcessName}(PID {p.Id})"; } catch { return "未知进程"; }
     }
 
-    public void Launch()
+    public void Launch(string? userDataDir = null)
     {
         if (string.IsNullOrEmpty(_exePath) || !File.Exists(_exePath))
             throw new FileNotFoundException("找不到客户端：" + _exePath);
@@ -160,14 +160,25 @@ public sealed class ClientController : IClientController
         {
             // 走 open -a 而不是直接 exec Contents/MacOS/Electron：后者绕过 LaunchServices，
             // 应用拿不到 bundle 身份（图标、应用名、单实例语义都会退化）。
-            Process.Start(new ProcessStartInfo("/usr/bin/open")
+            var psi = new ProcessStartInfo("/usr/bin/open")
             {
-                ArgumentList = { "-a", bundle },
                 UseShellExecute = false,
-            });
+            };
+            psi.ArgumentList.Add("-a");
+            psi.ArgumentList.Add(bundle);
+            if (!string.IsNullOrWhiteSpace(userDataDir))
+            {
+                psi.ArgumentList.Add("--args");
+                psi.ArgumentList.Add("--user-data-dir=" + userDataDir);
+            }
+            Process.Start(psi);
             return;
         }
-        Process.Start(new ProcessStartInfo(_exePath) { UseShellExecute = true });
+
+        var start = new ProcessStartInfo(_exePath) { UseShellExecute = true };
+        if (!string.IsNullOrWhiteSpace(userDataDir))
+            start.ArgumentList.Add("--user-data-dir=" + userDataDir);
+        Process.Start(start);
     }
 
     public bool IsRunning() => GetProcessCount() > 0;

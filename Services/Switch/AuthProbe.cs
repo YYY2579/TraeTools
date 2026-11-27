@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace TraeSwitch.Services;
@@ -44,6 +46,35 @@ public static class AuthProbe
         catch { return null; }
         return HasAuthCredsText(json);
     }
+
+    /// <summary>
+    /// 账号身份指纹：对 usertag 键取值后做 SHA-256，只用于"是否切到目标账号"的比较，
+    /// 不回显原文。token 每次启动会轮换，usertag 是稳定账号标识，适合做判据。
+    /// 键缺失/读取失败返回 null。
+    /// </summary>
+    public static string? IdentityHash(string path)
+    {
+        string json;
+        try { json = File.ReadAllText(path); }
+        catch { return null; }
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty(AuthKeys[0], out var v)
+                || v.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(v.GetString())) return null;
+            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(v.GetString()!));
+            return Convert.ToHexString(bytes).ToLowerInvariant();
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// 从某账号的独立档案里读取身份哈希，供"识别当前 live 属于哪个已建档账号"使用。
+    /// 只做 Base64 解码 + SHA-256，不输出原文。
+    /// </summary>
+    public static string? ProfileIdentityHash(string profileDir)
+        => IdentityHash(StoragePath(profileDir));
 
     /// <summary>同 <see cref="HasAuthCreds"/>，但直接对 JSON 文本判定（解析失败视为瞬态 null）。</summary>
     public static bool? HasAuthCredsText(string json)

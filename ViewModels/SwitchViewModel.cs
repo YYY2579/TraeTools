@@ -2,7 +2,10 @@ using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
+using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -37,6 +40,9 @@ public partial class SwitchViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isSwitching;
 
+    /// <summary>手动切换与自动快照保鲜共用，禁止切换中途写回 vault。</summary>
+    private readonly SemaphoreSlim _vaultGate = new(1, 1);
+
     public ObservableCollection<AccountInfo> Accounts { get; } = new();
     public ObservableCollection<SwitchStep> Steps { get; } = new();
 
@@ -46,10 +52,10 @@ public partial class SwitchViewModel : ViewModelBase
     public SwitchViewModel()
     {
         Steps.Add(new SwitchStep { Index = 1, Title = "结束客户端", Description = "关闭 Trae 客户端进程", Status = "idle" });
-        Steps.Add(new SwitchStep { Index = 2, Title = "快照回滚区", Description = "备份当前账号状态", Status = "idle" });
-        Steps.Add(new SwitchStep { Index = 3, Title = "写回 vault", Description = "写入目标账号载体", Status = "idle" });
-        Steps.Add(new SwitchStep { Index = 4, Title = "拉起客户端", Description = "启动 Trae 客户端", Status = "idle" });
-        Steps.Add(new SwitchStep { Index = 5, Title = "判定结果", Description = "校验登录态", Status = "idle" });
+        Steps.Add(new SwitchStep { Index = 2, Title = "定位账号档案", Description = "读取该账号独立数据目录", Status = "idle" });
+        Steps.Add(new SwitchStep { Index = 3, Title = "校验设备指纹", Description = "确认 machineid 与其他账号不同", Status = "idle" });
+        Steps.Add(new SwitchStep { Index = 4, Title = "隔离启动", Description = "用 --user-data-dir 启动该账号", Status = "idle" });
+        Steps.Add(new SwitchStep { Index = 5, Title = "判定结果", Description = "核对账号标识是否匹配", Status = "idle" });
 
         LoadAccounts();
         EnsureFingerprint();   // 指纹为空/过期时自动重探回填，避免「未配置载体指纹」卡死建档/切换
@@ -195,10 +201,8 @@ public partial class SwitchViewModel : ViewModelBase
         var settings = MainViewModel.SwitchSettings;
         var vault = MainViewModel.Vault;
 
-        if (vault != null)
-        {
-            VaultPath = TraeTools.Services.DataPaths.VaultDir;
-        }
+        // 新流程的"数据目录"= 各账号独立数据目录的根，不是旧 vault。
+        VaultPath = ProfileIsolation.ProfilesRoot;
 
         if (settings == null)
         {
@@ -225,6 +229,11 @@ public partial class SwitchViewModel : ViewModelBase
         var colors = new[] { "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899" };
         int idx = 0;
 
+        // 当前 live 账号标识：读默认目录的 storage.json，只取哈希，不回显原文。
+        string? liveIdentity = null;
+        try { liveIdentity = AuthProbe.IdentityHash(AuthProbe.StoragePath(settings.Data.RootDir)); }
+        catch { /* 读不到就全部按"已建档"展示，不标当前 */ }
+
         // 手机号索引：切换页账号名（建档名）→ 脱敏手机号（#14）。
         // 与设置页账号管理同源（TraeAccount.MobileMasked），按备注名/平台昵称忽略大小写匹配。
         var mobileByAccount = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -244,12 +253,20 @@ public partial class SwitchViewModel : ViewModelBase
             idx++;
             try
             {
-                VaultInfo? info = null;
-                try { info = vault?.GetInfo(acc); } catch { /* 按未建档处理 */ }
+                var info = ProfileIsolation.GetInfo(acc);
+                bool ready = ProfileIsolation.IsReady(acc);
+                bool pending = ProfileIsolation.IsPending(acc);
 
-                double score = 0;
-                try { score = vault?.MatchScore(acc) ?? 0; } catch { /* 评分失败忽略 */ }
-                bool isCurrent = score >= 0.75;
+                bool isCurrent = false;
+                if (ready && liveIdentity != null)
+                {
+                    try
+                    {
+                        var p = AuthProbe.IdentityHash(AuthProbe.StoragePath(ProfileIsolation.ProfileDir(acc)));
+                        isCurrent = p != null && string.Equals(p, liveIdentity, StringComparison.OrdinalIgnoreCase);
+                    }
+                    catch { /* 档案读不到按非当前处理 */ }
+                }
 
                 string status;
                 string statusType;
@@ -258,14 +275,19 @@ public partial class SwitchViewModel : ViewModelBase
                     status = "当前 ✓";
                     statusType = "ok";
                 }
-                else if (info != null)
+                else if (ready)
                 {
-                    status = "已建档";
+                    status = "已就绪";
                     statusType = "info";
+                }
+                else if (pending)
+                {
+                    status = "待登录";
+                    statusType = "warn";
                 }
                 else
                 {
-                    status = "未建档";
+                    status = "未创建";
                     statusType = "warn";
                 }
 
@@ -277,9 +299,9 @@ public partial class SwitchViewModel : ViewModelBase
                     Status = status,
                     StatusType = statusType,
                     MobileText = mobileByAccount.TryGetValue(acc, out var m) ? m : "",
-                    CreatedAt = info?.CreatedLocal?.ToString("yyyy-MM-dd HH:mm") ?? "未建档",
-                    Carriers = info?.EntryCount ?? 0,
-                    Similarity = isCurrent ? "100%" : (info != null ? $"{(int)(score * 100)}%" : "—"),
+                    CreatedAt = info?.CreatedLocal?.ToString("yyyy-MM-dd HH:mm") ?? (pending ? "待登录" : "未创建"),
+                    Carriers = info?.Files ?? 0,
+                    Similarity = isCurrent ? "100%" : (ready ? "独立" : "—"),
                     IsCurrent = isCurrent
                 });
             }
@@ -296,7 +318,8 @@ public partial class SwitchViewModel : ViewModelBase
         }
 
         AccountCountText = $"{Accounts.Count} 个账号";
-        LogText = $"[{DateTime.Now:HH:mm:ss}] 已加载 {Accounts.Count} 个账号档案\n选中目标账号后点击「切换至此」";
+        LogText = $"[{DateTime.Now:HH:mm:ss}] 已加载 {Accounts.Count} 个账号\n"
+                + "新账号：点「新建账号」→ 在弹出的 Trae 窗口登录 → 状态变「已就绪」后即可一键切换";
     }
 
     private void AddMockAccounts(string reason)
@@ -368,6 +391,44 @@ public partial class SwitchViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// 从签到配置导入账号名称到切换列表。只补名称，不复制凭证；
+    /// 导入的账号仍需逐账号「建档」后才能切换。
+    /// </summary>
+    [RelayCommand]
+    private void ImportFromCheckinAccounts()
+    {
+        var settings = MainViewModel.SwitchSettings;
+        var cfg = MainViewModel.AppConfig;
+        if (settings == null || cfg == null)
+        {
+            AppendLog("导入失败：签到配置或切换配置未初始化");
+            return;
+        }
+
+        var existing = new HashSet<string>(settings.Data.Accounts, StringComparer.OrdinalIgnoreCase);
+        var imported = new List<string>();
+        foreach (var acc in cfg.Accounts)
+        {
+            var name = (acc.Name ?? acc.ScreenName ?? "").Trim();
+            if (name.Length == 0 || !existing.Add(name)) continue;
+            settings.Data.Accounts.Add(name);
+            imported.Add(name);
+        }
+
+        if (imported.Count == 0)
+        {
+            AppendLog("没有需要导入的账号名称（可能已全部存在）");
+            return;
+        }
+
+        try { settings.Save(); }
+        catch (Exception ex) { AppendLog("导入账号名称后保存失败：" + ex.Message); }
+
+        LoadAccounts();
+        AppendLog($"已从签到账号导入 {imported.Count} 个名称到切换列表；这些账号仍需先在客户端登录并「建档」后才能切换");
+    }
+
+    /// <summary>
     /// 一键冷切换（真实执行）：复用 TraeSwitch SwitcherService 编排——
     /// 结束客户端 → 快照回滚区 → 写回目标账号 vault → 拉起客户端 → 守护判定。
     /// 失败（RolledBack）时服务内部已自动回滚并重启；NeedsConfirm 需要人工确认。
@@ -386,36 +447,46 @@ public partial class SwitchViewModel : ViewModelBase
             AppendLog("切换服务未初始化（TraeSwitch 配置缺失）");
             return;
         }
-        EnsureFingerprint();   // 切前兜底：仍为空则说明确实没有载体，转报明确提示
-        if (settings.Data.Fingerprint.Count == 0)
+        if (!ProfileIsolation.IsReady(SelectedAccount.Name))
         {
-            AppendLog("尚未配置载体指纹，且未检测到客户端登录态载体，无法切换");
+            AppendLog(ProfileIsolation.IsPending(SelectedAccount.Name)
+                ? $"「{SelectedAccount.Name}」还没登录。点「新建账号」会为它打开专用窗口，登录完成后即可切换"
+                : $"「{SelectedAccount.Name}」还没创建独立目录。点「新建账号」创建并在窗口中登录");
+            return;
+        }
+        // 档案里只有 usertag、没有 token（icube.cloudide）= 建档时客户端其实没登录完整，
+        // 切过去必然显示未登录。必须在切换前拦下，而不是切完才发现。
+        if (AuthProbe.HasAuthCreds(AuthProbe.StoragePath(ProfileIsolation.ProfileDir(SelectedAccount.Name))) != true)
+        {
+            AppendLog($"「{SelectedAccount.Name}」档案缺少登录凭据（建档时可能未登录完整），已阻止切换。"
+                      + "请先在 Trae 登录该账号，再点「建档」重建档案。");
             return;
         }
 
+        await _vaultGate.WaitAsync();
         IsSwitching = true;
         ResetSteps();
         TraeSwitch.Services.SwitchOutcome? outcome = null;
         try
         {
             var name = SelectedAccount.Name;
+            var profileDir = ProfileIsolation.ProfileDir(name);
             var sw = new SwitcherService(settings.Data.RootDir, vault, client);
-            AppendLog($"开始切换至 {name}…");
-            AppendLog("正在结束客户端并快照回滚区…");
+            AppendLog($"开始切换至 {name}（独立目录：{profileDir}）");
+            AppendLog("正在结束客户端…");
             Steps[0].Status = "progress";
             await Task.Delay(150);
-            Steps[0].Status = "ok"; Steps[1].Status = "progress";
+            Steps[0].Status = "ok"; Steps[1].Status = "ok"; Steps[2].Status = "ok"; Steps[3].Status = "progress";
 
-            outcome = await sw.SwitchWithGuardAsync(name, settings.Data.Fingerprint,
+            outcome = await sw.SwitchToProfileAsync(name, profileDir,
                 progress: elapsed =>
                 {
-                    // 轮询期间的守护进度，输出到日志
                     int sec = (int)elapsed.TotalSeconds;
                     if (sec >= 4 && sec % 4 == 0)
-                        AppendLog($"守护中：等待客户端写入会话…（{sec} 秒 / 最长 20 秒）");
+                        AppendLog($"守护中：正在核对账号标识…（{sec} 秒 / 最长 20 秒）");
                 });
 
-            Steps[1].Status = "ok"; Steps[2].Status = "ok"; Steps[3].Status = "ok"; Steps[4].Status = "progress";
+            Steps[3].Status = "ok"; Steps[4].Status = "progress";
 
             switch (outcome.Kind)
             {
@@ -423,22 +494,16 @@ public partial class SwitchViewModel : ViewModelBase
                     Steps[4].Status = "ok";
                     AppendLog($"切换成功：已进入 {name}（{outcome.Detail}）");
                     SyncActiveAccount(name);
-                    // P0-5：切换成功后立即把 live 的 storage.json 回写该账号 vault，
-                    // 存下服务端刚轮换的新 refresh token，避免下次切号因旧凭据已作废而 401。
-                    if (vault.SyncBackStorageToVault(name, settings.Data.Fingerprint))
-                        AppendLog($"已回写「{name}」的登录凭据到 vault（下次切号可复用新会话）");
-                    else
-                        AppendLog($"提示：未能回写「{name}」的登录凭据到 vault，该账号下次切换可能失效，建议重新登录后「建档」");
                     break;
                 case SwitchOutcomeKind.RolledBack:
                     Steps[4].Status = "warn";
-                    AppendLog($"切换失败（{outcome.Detail}），已自动回滚到切换前账号并重启客户端");
-                    AppendLog("处理：如需切换到该账号，请先在其上登录一次并「建档」更新会话备份");
+                    AppendLog($"切换失败（{outcome.Detail}），已恢复默认目录并重启客户端");
+                    AppendLog("处理：请在该账号的独立目录里重新登录一次，然后点「建档」更新档案");
                     break;
                 case SwitchOutcomeKind.NeedsConfirm:
                     Steps[4].Status = "warn";
-                    AppendLog($"无法自动判定结果：{outcome.Detail}。");
-                    AppendLog($"请人工确认：若界面已进入「{name}」，点「校验」复核；若未进入，请重新切换或先在该账号上登录建档。");
+                    AppendLog($"无法自动判定：{outcome.Detail}");
+                    AppendLog("请人工确认客户端右上角账号；若不对，请关闭客户端后重新切换。");
                     break;
             }
 
@@ -459,6 +524,7 @@ public partial class SwitchViewModel : ViewModelBase
                 try { Directory.Delete(dir, recursive: true); } catch { /* 忽略清理失败 */ }
             }
             IsSwitching = false;
+            _vaultGate.Release();
         }
     }
 
@@ -489,14 +555,68 @@ public partial class SwitchViewModel : ViewModelBase
         if (SelectedAccount == null) { AppendLog("请先选择账号"); return; }
         try
         {
-            var vault = MainViewModel.Vault;
-            double? score = null;
-            try { score = vault?.MatchScore(SelectedAccount.Name); } catch { /* 忽略 */ }
-            AppendLog(score.HasValue
-                ? $"校验 {SelectedAccount.Name}：相似度 {(int)(score.Value * 100)}%"
-                : $"校验 {SelectedAccount.Name}：无建档数据");
+            var name = SelectedAccount.Name;
+            if (!ProfileIsolation.IsReady(name))
+            {
+                AppendLog($"校验 {name}：无独立数据目录（未建档）");
+                return;
+            }
+            var id = AuthProbe.IdentityHash(AuthProbe.StoragePath(ProfileIsolation.ProfileDir(name)));
+            var midHash = MachineIdHash(name);
+            var settings2 = MainViewModel.SwitchSettings;
+            int duplicates = 0;
+            if (settings2 != null && midHash != null)
+                duplicates = settings2.Data.Accounts.Count(a =>
+                    !string.Equals(a, name, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(MachineIdHash(a), midHash, StringComparison.OrdinalIgnoreCase));
+            AppendLog($"校验 {name}：身份标识 {(id == null ? "缺失" : "有效")}，设备指纹 {(midHash?[..10] ?? "缺失")}，重复指纹 {duplicates} 个");
         }
         catch (Exception ex) { AppendLog("校验异常：" + ex.Message); }
+    }
+
+    /// <summary>轻量模态消息框（纯代码构造，避免为一个提示新建 axaml）。</summary>
+    private static async Task MessageBoxShow(Window owner, string title, string message)
+    {
+        try
+        {
+            var btn = new Avalonia.Controls.Button { Content = "知道了", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right, Width = 90 };
+            var dlg = new Avalonia.Controls.Window
+            {
+                Title = title,
+                Width = 460,
+                SizeToContent = Avalonia.Controls.SizeToContent.Height,
+                WindowStartupLocation = Avalonia.Controls.WindowStartupLocation.CenterOwner,
+                Content = new Avalonia.Controls.StackPanel
+                {
+                    Margin = new Avalonia.Thickness(20),
+                    Spacing = 16,
+                    Children =
+                    {
+                        new Avalonia.Controls.TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                        btn,
+                    }
+                }
+            };
+            btn.Click += (_, _) => dlg.Close();
+            if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+                await dlg.ShowDialog(owner);
+            else
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => dlg.ShowDialog(owner));
+        }
+        catch { /* 弹窗失败不影响阻断（下面仍会写日志并返回） */ }
+    }
+
+    /// <summary>只读取某账号独立目录的 machineid 哈希；无档案/读失败返回 null。</summary>
+    private static string? MachineIdHash(string account)
+    {
+        try
+        {
+            var path = Path.Combine(ProfileIsolation.ProfileDir(account), "machineid");
+            if (!File.Exists(path)) return null;
+            var bytes = System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path));
+            return Convert.ToHexString(bytes).ToLowerInvariant();
+        }
+        catch { return null; }
     }
 
     [RelayCommand]
@@ -508,14 +628,67 @@ public partial class SwitchViewModel : ViewModelBase
             var settings = MainViewModel.SwitchSettings;
             if (settings != null)
             {
-                settings.Data.Accounts.Remove(SelectedAccount.Name);
+                var name = SelectedAccount.Name;
+                settings.Data.Accounts.Remove(name);
                 settings.Save();
-                AppendLog($"已从列表移除「{SelectedAccount.Name}」（vault 目录请手动清理）");
+                ProfileIsolation.DeleteProfile(name);
+                AppendLog($"已移除「{name}」并删除其独立数据目录");
                 LoadAccounts();
             }
             else { AppendLog("删除失败：设置服务未初始化"); }
         }
         catch (Exception ex) { AppendLog("删除失败：" + ex.Message); }
+    }
+
+    /// <summary>
+    /// 新建账号并直接进入登录：建空目录 → 用该目录启动 Trae → 用户登录后登录态写进该目录。
+    /// 不再需要"先在默认目录登录、再复制建档"两步，也就不会把 A 的登录态存成 B。
+    /// </summary>
+    [RelayCommand]
+    private async Task NewAccountAndLogin()
+    {
+        var settings = MainViewModel.SwitchSettings;
+        var client = BuildClient();
+        if (settings == null || client == null)
+        {
+            AppendLog("切换服务未初始化（TraeSwitch 配置缺失）");
+            return;
+        }
+
+        var owner = UiHost.MainWindow;
+        var dlg = new InputWindow(
+            "新建账号",
+            "输入账号名称（如「主号 / 小号」）。确定后会打开一个专用 Trae 窗口，请在该窗口登录这个账号；"
+            + "登录完成后本页状态会自动变为「已就绪」。",
+            "如：主号 / 小号", "");
+        string? input = owner != null ? await dlg.ShowDialog<string>(owner) : null;
+        if (string.IsNullOrWhiteSpace(input)) { AppendLog("已取消新建账号"); return; }
+
+        var name = input.Trim();
+        if (settings.Data.Accounts.Contains(name, StringComparer.OrdinalIgnoreCase))
+        {
+            AppendLog($"账号「{name}」已存在。如需重新登录，选中它后点「切换至此」，在窗口里登录即可");
+            return;
+        }
+
+        await _vaultGate.WaitAsync();
+        IsSwitching = true;
+        try
+        {
+            settings.Data.Accounts.Add(name);
+            settings.Save();
+            ProfileIsolation.CreateEmptyProfile(name);
+            AppendLog($"已为「{name}」创建独立数据目录，正在打开专用 Trae 窗口…");
+
+            await Task.Run(() => client.KillAll());
+            await Task.Delay(400);
+            client.Launch(ProfileIsolation.ProfileDir(name));
+
+            AppendLog($"请在弹出的 Trae 窗口登录「{name}」。该目录已与设备指纹隔离，登录态只属于这个账号。");
+            LoadAccounts();
+        }
+        catch (Exception ex) { AppendLog("新建账号失败：" + ex.Message); }
+        finally { IsSwitching = false; _vaultGate.Release(); }
     }
 
     [RelayCommand]
@@ -526,33 +699,53 @@ public partial class SwitchViewModel : ViewModelBase
         var vault = MainViewModel.Vault;
         if (vault == null || settings == null) { AppendLog("建档失败：服务未初始化"); return; }
 
+        // 识别当前 live 属于哪个已建档账号：用 storage.json 里 usertag 加密 blob 的
+        // SHA-256 比对各档案（同一账号跨目录稳定，且不依赖明文 JWT——实测 JWT 是加密的读不到）。
+        // 这是"把 A 的登录态存成 B 的档案"的唯一可靠防线。
+        string detectedName = "";
+        string? liveId = null;
+        try { liveId = AuthProbe.ProfileIdentityHash(settings.Data.RootDir); }
+        catch { /* 读不到则无法识别，靠下面的兜底提示 */ }
+
+        if (liveId != null)
+        {
+            foreach (var acc in settings.Data.Accounts)
+            {
+                if (!ProfileIsolation.IsReady(acc)) continue;
+                try
+                {
+                    var hid = AuthProbe.ProfileIdentityHash(ProfileIsolation.ProfileDir(acc));
+                    if (hid != null && string.Equals(hid, liveId, StringComparison.OrdinalIgnoreCase))
+                    { detectedName = acc; break; }
+                }
+                catch { /* 单账户读失败继续 */ }
+            }
+        }
+
         // 修复：账号列表已删空时，建档不再卡死——改为弹窗输入新账号名直接建档
         string account = SelectedAccount?.Name ?? "";
+        if (!string.IsNullOrEmpty(account) && !string.IsNullOrEmpty(detectedName)
+            && !string.Equals(account, detectedName, StringComparison.OrdinalIgnoreCase))
+        {
+            var owner0 = UiHost.MainWindow;
+            var msg = $"当前 Trae 客户端登录的是「{detectedName}」，而不是你选中的「{account}」。\n\n"
+                    + $"继续建档会把「{detectedName}」的登录态存进「{account}」档案，之后切换到「{account}」实际进入的仍是「{detectedName}」。\n\n"
+                    + "正确做法：先在 Trae 里登录「{account}」，再回来建档；或选中「" + detectedName + "」重新建档。";
+            if (owner0 != null)
+                await MessageBoxShow(owner0, "建档已阻断", msg);
+            AppendLog($"建档已阻断：当前登录「{detectedName}」≠ 选中「{account}」");
+            return;
+        }
         if (string.IsNullOrEmpty(account))
         {
-            // 自动检测：读当前客户端登录态，JWT uid 与应用账号匹配时预填该账号名
-            string suggested = "";
-            try
-            {
-                var import = await TraeTools.Services.Login.LocalClientImporter.TryImportAsync();
-                var uid = TraeCheckin.TokenUtils.ParseAccountUid(import.Token);
-                var match = string.IsNullOrEmpty(uid) ? null
-                    : MainViewModel.AppConfig?.Accounts.FirstOrDefault(a => a.AccountUid == uid);
-                if (match != null)
-                {
-                    suggested = match.Name ?? "";
-                    AppendLog($"检测到当前客户端登录：{suggested}（已匹配应用账号），直接确认即可建档");
-                }
-                else if (!string.IsNullOrEmpty(import.Token))
-                {
-                    AppendLog("检测到当前客户端已登录，但与现有应用账号不匹配；请为这份登录态命名");
-                }
-                else
-                {
-                    AppendLog("未检测到客户端登录态：请先在 Trae 客户端登录后再建档，或手动输入名称");
-                }
-            }
-            catch { /* 检测失败则退回手动输入 */ }
+            // 无选中账号时弹窗输入：把识别到的账号名作为默认值，避免用户手输错名
+            string suggested = detectedName;
+            if (!string.IsNullOrEmpty(suggested))
+                AppendLog($"检测到当前客户端登录：{suggested}（按此名建档即可）");
+            else if (liveId != null)
+                AppendLog("当前客户端已登录，但该账号尚未建档；请为这份登录态命名");
+            else
+                AppendLog("未检测到客户端登录态：请先在 Trae 客户端登录后再建档，或手动输入名称");
 
             var owner = UiHost.MainWindow;
             var dlg = new InputWindow(
@@ -579,20 +772,55 @@ public partial class SwitchViewModel : ViewModelBase
 
         try
         {
-            // 与 TraeSwitch 一致：建档前若客户端运行则先退出，以解除登录态文件占用
+            // 建档必须由用户明确"哪个目录的哪份登录态"：客户端运行中时它可能正跑在某个
+            // 账号的独立目录里，而建档固定从默认目录复制——两者不是同一个账号时，
+            // 会把 A 的登录态写进 B 的档案（小蒋档案被小Y覆盖就是这么来的）。
+            // 因此运行中直接拒绝，让用户先关客户端、确认默认目录登录的是目标账号。
             var client = BuildClient();
             if (client != null && client.IsRunning())
             {
-                AppendLog("检测到客户端运行中，正在自动退出（解除登录态文件占用）…");
-                // KillAll 内部是 12s 优雅等待 + 8s 强杀等待的 Thread.Sleep 轮询，同步调用会把界面冻住十几秒。
-                await Task.Run(() => client.KillAll());
-                await Task.Delay(500);
+                AppendLog("建档已中止：Trae 客户端正在运行。请先完全退出 Trae（不是最小化），"
+                          + "确认默认目录登录的是目标账号，再点建档。"
+                          + "若客户端正跑在某个账号的独立目录里，直接在该窗口登录即可，无需再建档。");
+                return;
             }
 
-            AppendLog($"开始建档：{account}…");
-            int count = await vault.BackupAsync(account, settings.Data.Fingerprint);
-            bool ok = await vault.VerifyAsync(account);
-            AppendLog($"建档完成：{count} 个载体文件，校验 {(ok ? "通过" : "未通过")}");
+            var liveRoot = settings.Data.RootDir;
+            if (!Directory.Exists(liveRoot))
+            {
+                AppendLog($"建档失败：客户端数据目录不存在（{liveRoot}）");
+                return;
+            }
+
+            // 关键前置校验：必须两把凭据键都齐全（usertag = 身份，icube.cloudide = 登录 token）。
+            // 之前只校验"有 storage.json"，结果把一份没登录完整的状态存成了小蒋档案，
+            // 切过去客户端显示未登录——这是坏档案的来源。
+            var liveAuth = AuthProbe.HasAuthCreds(AuthProbe.StoragePath(liveRoot));
+            if (liveAuth != true)
+            {
+                AppendLog(liveAuth == false
+                    ? $"建档已中止：当前 Trae 客户端未登录（缺少登录凭据）。请先在客户端登录「{account}」，确认界面已进入后再建档。"
+                    : $"建档已中止：读不到客户端登录凭据（文件可能被占用）。请关闭 Trae 后重试。");
+                return;
+            }
+
+            AppendLog($"开始建档：{account}（从当前登录态复制到独立目录，并重置设备指纹）…");
+            int count = await Task.Run(() => ProfileIsolation.CreateProfile(account, liveRoot));
+
+            // 建完再验一次档案本身：复制过程若丢文件，不能留下坏档案。
+            var profAuth = AuthProbe.HasAuthCreds(AuthProbe.StoragePath(ProfileIsolation.ProfileDir(account)));
+            if (profAuth != true)
+            {
+                try { ProfileIsolation.DeleteProfile(account); } catch { /* 清理失败不阻断提示 */ }
+                AppendLog($"建档失败：档案登录凭据不完整，已删除该坏档案。请重新登录「{account}」后再建档。");
+                LoadAccounts();
+                return;
+            }
+
+            var info = ProfileIsolation.GetInfo(account);
+            bool ok = ProfileIsolation.IsReady(account) && count > 0;
+            AppendLog($"建档完成：{count} 个文件，独立目录 {ProfileIsolation.ProfileDir(account)}，校验 {(ok ? "通过" : "未通过")}");
+            if (!ok) AppendLog("提示：当前客户端可能未登录；请先登录目标账号再建档");
             LoadAccounts();
             // 建档后自动选中新账号，用户可直接点「校验」复核，避免误报「无建档数据」（#34）
             var created = Accounts.FirstOrDefault(a => string.Equals(a.Name, account, StringComparison.OrdinalIgnoreCase));
@@ -601,62 +829,39 @@ public partial class SwitchViewModel : ViewModelBase
         catch (Exception ex) { AppendLog("建档失败：" + ex.Message); }
     }
 
-    /// <summary>快照刷新运行锁（防重入，见 TryAutoRefreshSnapshotAsync）。</summary>
-    private bool _refreshBusy;
-
     /// <summary>最近一次快照检查时间；10 分钟内不重复全量哈希（#33：原先每 30 秒全量跑，一晚 2880 轮）。</summary>
     private DateTime _lastRefreshCheckUtc = DateTime.MinValue;
 
     /// <summary>
-    /// 快照自动刷新（TraeSwitch「会话保鲜」）：客户端已退出且能唯一识别当前账号、
-    /// 且该账号备份与当前会话不一致时，用当前会话静默刷新其备份。
+    /// 定时巡检（原「快照保鲜」）：新流程下档案就是目录本身，客户端登录完成后
+    /// 状态需要从「待登录」自动变成「已就绪」。仅在状态变化时重建列表，避免无谓刷新。
     /// </summary>
-    internal async Task TryAutoRefreshSnapshotAsync()
+    internal Task TryAutoRefreshSnapshotAsync()
     {
-        if (_refreshBusy) return;
-        var now = DateTime.UtcNow;
-        if ((now - _lastRefreshCheckUtc).TotalMinutes < 10) return;
-        _lastRefreshCheckUtc = now;
-        _refreshBusy = true;
         try
         {
             var settings = MainViewModel.SwitchSettings;
-            var vault = MainViewModel.Vault;
-            var client = BuildClient();
-            if (settings == null || vault == null || client == null) return;
-            if (client.IsRunning()) return;                       // 运行中不读登录态
-            if (settings.Data.Fingerprint.Count == 0) return;
+            if (settings == null) return Task.CompletedTask;
 
-            // 识别当前 live 属主：最高分 ≥0.75 且显著领先次高
-            var accs = settings.Data.Accounts;
-            if (accs == null || accs.Count == 0) return;
-            var scores = accs
-                .Select(a => (a, v: vault.MatchScore(a)))
-                .Where(x => x.v.HasValue)
-                .OrderByDescending(x => x.v!.Value)
-                .ToList();
-            if (scores.Count == 0) return;
-            var best = scores[0];
-            if (best.v!.Value < 0.75) return;
-            if (scores.Count > 1 && best.v!.Value - scores[1].v!.Value < 0.2) return;
-
-            string account = best.a;
-            var guid = best.v!.Value;
-            if (await vault.VerifyAsync(account))
+            bool changed = false;
+            foreach (var acc in settings.Data.Accounts)
             {
-                AppendLog($"「{account}」备份与当前会话一致，无需刷新");
-                return;
+                bool ready = ProfileIsolation.IsReady(acc);
+                if (_lastReadyState.TryGetValue(acc, out var prev))
+                {
+                    if (prev != ready) { changed = true; _lastReadyState[acc] = ready; }
+                }
+                else _lastReadyState[acc] = ready;
             }
-            int count = await vault.BackupAsync(account, settings.Data.Fingerprint);
-            AppendLog($"已用当前会话自动刷新「{account}」的备份（载体 {count} 个）");
-            LoadAccounts();
+            if (changed && !IsSwitching) LoadAccounts();
         }
-        catch (Exception ex)
-        {
-            AppendLog("快照自动刷新失败：" + ex.Message);
-        }
-        finally { _refreshBusy = false; }
+        catch { /* 巡检失败忽略，不影响主流程 */ }
+        return Task.CompletedTask;
     }
+
+    /// <summary>各账号最近一次「已就绪」状态，用于检测登录完成。</summary>
+    private readonly Dictionary<string, bool> _lastReadyState = new(StringComparer.OrdinalIgnoreCase);
+
 }
 
 

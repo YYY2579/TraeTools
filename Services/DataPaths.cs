@@ -3,15 +3,75 @@ using System.IO;
 namespace TraeTools.Services;
 
 /// <summary>
-/// 统一数据根目录（%APPDATA%\TraeTools），收敛历史遗留的 TraeCheckin / TraeSwitch 三个目录。
+/// 统一数据根目录：Windows = %APPDATA%\TraeTools；macOS = ~/Library/Application Support/TraeTools。
+/// 收敛历史遗留的 TraeCheckin / TraeSwitch 三个目录。
 /// WebView 缓存与抓包输出保持在 %LOCALAPPDATA%\TraeTools（缓存不进 APPDATA）。
 /// 启动时调用 Migrate() 把旧目录数据自动搬入新位置（幂等、失败不阻塞）。
 /// </summary>
 public static class DataPaths
 {
-    /// <summary>根目录：%APPDATA%\TraeTools</summary>
-    public static string Root =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TraeTools");
+    /// <summary>
+    /// 根目录：Windows = %APPDATA%\TraeTools；macOS = ~/Library/Application Support/TraeTools。
+    /// .NET 在 macOS 上把 SpecialFolder.ApplicationData 映射到 ~/.config，直接用它得到的
+    /// 路径不符合 mac 惯例（卸载残留难找、Time Machine 备份遗漏），所以 mac 显式走惯例路径。
+    /// 两种芯片（Intel / Apple Silicon）的用户目录布局一致，同一条实现通吃，无需按架构分派。
+    /// 首次访问会触发 MacLegacyRootMigration：把旧版落在 ~/.config/TraeTools 的数据整体搬过来
+    /// （含 machine.key，保证已加密凭据仍可解密），幂等、失败不阻塞。
+    /// </summary>
+    public static string Root
+    {
+        get
+        {
+            if (OperatingSystem.IsWindows())
+                return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TraeTools");
+            var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                                    "Library", "Application Support", "TraeTools");
+            MigrateMacLegacyRoot(root);
+            return root;
+        }
+    }
+
+    private static int _macLegacyMigrated;
+
+    /// <summary>
+    /// 一次性把旧根（~/.config/TraeTools）搬到新根（~/Library/Application Support/TraeTools）。
+    /// 逐项搬、目标已存在则跳过（保留新数据不覆盖）；搬空后删掉旧壳，搬不空则保留旧目录
+    /// （宁可残留也不丢数据）。整个流程吞异常：迁移失败最多退回"新路径从零开始"，不影响启动。
+    /// </summary>
+    private static void MigrateMacLegacyRoot(string newRoot)
+    {
+        if (Interlocked.Exchange(ref _macLegacyMigrated, 1) == 1) return;
+        try
+        {
+            // SpecialFolder.ApplicationData 在 mac 上就是 ~/.config，旧版根目录在这里
+            var legacy = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TraeTools");
+            if (!Directory.Exists(legacy)) return;
+            MoveTree(legacy, newRoot);
+            // 旧目录已搬空（无任何残留条目）才删壳
+            if (!Directory.EnumerateFileSystemEntries(legacy).Any())
+                Directory.Delete(legacy);
+        }
+        catch { /* 迁移失败不阻塞启动 */ }
+    }
+
+    /// <summary>把 src 的全部条目逐个移入 dst；dst 已有同名条目时跳过（不覆盖）。逐项失败继续下一项。</summary>
+    private static void MoveTree(string src, string dst)
+    {
+        try { Directory.CreateDirectory(dst); } catch { return; }
+        foreach (var f in Directory.GetFiles(src))
+            MoveFile(f, Path.Combine(dst, Path.GetFileName(f)));
+        foreach (var d in Directory.GetDirectories(src))
+        {
+            var target = Path.Combine(dst, Path.GetFileName(d));
+            if (Directory.Exists(target))
+                MoveTree(d, target);   // 同名目录：递归合并子内容
+            else
+            {
+                try { Directory.Move(d, target); }
+                catch { /* 单目录失败跳过 */ }
+            }
+        }
+    }
 
     /// <summary>签到配置 config.json。</summary>
     public static string ConfigPath => Path.Combine(Root, "config.json");

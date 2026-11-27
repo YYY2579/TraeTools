@@ -38,9 +38,22 @@ public static class CarrierDefaults
                      "Applications", ClientProcessName + ".app"),
     ];
 
-    /// <summary>客户端数据根：%APPDATA%\Trae CN（macOS 上即 ~/Library/Application Support/Trae CN）。</summary>
-    public static string DefaultUserDataDir =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), ClientProcessName);
+    /// <summary>
+    /// 客户端数据根：
+    ///   Windows = %APPDATA%\Trae CN；
+    ///   macOS   = ~/Library/Application Support/Trae CN。
+    /// 注意：.NET 在 macOS 上把 SpecialFolder.ApplicationData 映射到 ~/.config，
+    /// 直接用它拼 "Trae CN" 会得到一个不存在的路径（切换/导入全部失效），必须显式走 Application Support。
+    /// </summary>
+    public static string DefaultUserDataDir => OperatingSystem.IsWindows()
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), ClientProcessName)
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                       "Library", "Application Support", ClientProcessName);
+
+    /// <summary>客户端数据目录的父目录：Windows=%APPDATA%，macOS=~/Library/Application Support。</summary>
+    public static string ClientDataRoot => OperatingSystem.IsWindows()
+        ? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Application Support");
 
     /// <summary>
     /// 用于枚举/关闭客户端的 OS 进程名。macOS 上必须是 "Electron"，

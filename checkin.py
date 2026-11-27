@@ -8,6 +8,9 @@ Trae 每日签到脚本（GitHub Actions 版）
   `X-Cloudide-Session`（约 14 天有效）。本脚本通过该 Cookie 调用
   `GetUserToken` 接口换取全新 JWT，再用新 JWT 执行每日签到。
 
+成功判据（严格）：claim 返回 code==0，且随后 status 返回 checked_in=true
+并且本次积分 >0。只有满足这三项才打印「签到成功」并以退出码 0 结束。
+
 依赖：仅标准库，无第三方依赖。
 
 环境变量：
@@ -65,20 +68,47 @@ def get_token(session: str) -> str:
     return token
 
 
-def checkin(token: str, device_id: str) -> dict:
-    """执行每日签到（claim）。"""
-    headers = {
+def _checkin_headers(token: str, device_id: str) -> dict:
+    """签到相关接口的统一鉴权头。"""
+    return {
         "Authorization": "Cloud-IDE-JWT " + token,
         "X-User-Region": "cn",
         "x-device-id": device_id,
         "Content-Type": "application/json",
         "User-Agent": "TraeCheckin/1.0",
     }
-    status, text = _post("/trae/api/v2/ug/checkin_credits/claim", headers, "{}")
+
+
+def checkin(token: str, device_id: str) -> dict:
+    """执行每日签到（claim）。"""
+    status, text = _post("/trae/api/v2/ug/checkin_credits/claim",
+                         _checkin_headers(token, device_id), "{}")
     try:
         return {"http": status, "body": json.loads(text)}
     except json.JSONDecodeError:
         return {"http": status, "body": {"raw": text}}
+
+
+def get_status(token: str, device_id: str) -> dict:
+    """查询签到状态，用于严格复核 claim 是否真的生效。"""
+    status, text = _post("/trae/api/v2/ug/checkin_credits/status",
+                         _checkin_headers(token, device_id), "{}")
+    try:
+        return {"http": status, "body": json.loads(text)}
+    except json.JSONDecodeError:
+        return {"http": status, "body": {"raw": text}}
+
+
+def evaluate_claim(claim: dict, status: dict) -> tuple:
+    """严格成功判据：claim 200 + code==0，且 status 200 + code==0 + checked_in + 本次积分>0。"""
+    if claim["http"] != 200 or claim["body"].get("code", -1) != 0:
+        return False, 0
+    s = status["body"]
+    if (status["http"] != 200 or s.get("code", -1) != 0
+            or not s.get("checked_in", False)):
+        return False, 0
+    gained = s.get("credits", 0) + s.get("extra_credits", 0)
+    return gained > 0, gained
 
 
 def notify_feishu(webhook, text):
@@ -152,14 +182,18 @@ def main():
                 result = checkin(token, device_id)
                 body = result["body"]
                 code = body.get("code", -1)
-            checked = body.get("checked_in", False)
-            ok = (result["http"] == 200) and (code == 0 or checked)
-            credits = body.get("credits", 0)
+            # 严格判据：claim 必须 code==0；再用 status 复核今日已签且本次确实发放积分。
+            # 旧判据 (code==0 or checked_in) 会把「code!=0 但响应带 checked_in」误报为成功。
+            st = get_status(token, device_id) if (result["http"] == 200 and code == 0) else {"http": 0, "body": {}}
+            ok, gained = evaluate_claim(result, st)
             if ok:
-                print("[%s] 签到成功，本次获得：%s 积分" % (name, credits))
+                print("[%s] 签到成功，本次获得：%s 积分" % (name, gained))
                 ok_names.append(name)
             else:
-                reason = body.get("message") or ("HTTP %s" % result["http"])
+                if result["http"] == 200 and code == 0:
+                    reason = "签到未生效：claim 返回 code=0，但 status 未确认已签或本次无新增积分"
+                else:
+                    reason = body.get("message") or ("HTTP %s" % result["http"])
                 print("[%s] 签到失败：%s" % (name, reason))
                 fail_names.append(name)
                 all_ok = False

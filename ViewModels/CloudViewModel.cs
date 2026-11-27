@@ -35,8 +35,12 @@ public partial class CloudViewModel : ViewModelBase
     [ObservableProperty]
     private string _credentialExpiry = "—";
 
+    /// <summary>用户主动触发的云端凭证检测结果，与本地估算分开显示。</summary>
     [ObservableProperty]
-    private string _warningText = "云端签到使用 TRAE_SESSION 作为凭证（Session 约 14 天有效；JWT 仅约 8 小时，由 Session 自动换新）。Session 过期后请重新登录 Trae 并重新部署。";
+    private string _credentialCheckText = "尚未检测云端凭证";
+
+    [ObservableProperty]
+    private string _warningText = "云端签到使用 TRAE_SESSION 作为凭证（Session 约 14 天有效；JWT 仅约 8 小时，由 Session 自动换新）。下方天数为本地估算，点「检测云端凭证」可实际验证。";
 
     /// <summary>提示条是否为「严重」态（红色）：Session 已过期或仅剩 ≤3 天，或云端最近一次运行失败。</summary>
     [ObservableProperty]
@@ -260,31 +264,30 @@ public partial class CloudViewModel : ViewModelBase
         var (leftDays, estimated) = SessionLeftDays();
         if (leftDays == int.MaxValue)
         {
-            CredentialExpiry = "未知（建议重新登录一次）";
+            CredentialExpiry = "未知（请点「检测云端凭证」）";
             WarningIsCritical = true;
-            WarningText = "无法确定云端 Session 的签发时间。若云端签到失败，请在本程序重新登录 Trae 后重新部署。";
+            WarningText = "本地无法确定 Session 签发时间，请点「检测云端凭证」实际验证；若无效，重新登录 Trae 后重新部署。";
             return;
         }
 
         string est = estimated ? "（按 Token 更新时间估算）" : "";
 
-        // 卡片里只放短文案：四列 Grid 宽度有限，长句子会被右侧裁掉；
-        // 「估算」口径放到下方提示条（那里有换行空间）。
+        // 天数只来自本地时间戳，必须显式标注估算；真实有效性用「检测云端凭证」按钮验证。
         CredentialExpiry = leftDays <= 0
-            ? "已过期，需重新登录"
-            : $"约 {leftDays} 天后过期";
+            ? "已过期（本地估算）"
+            : $"本地估算约 {leftDays} 天后过期";
 
         bool lastRunFailed = _lastRunConclusion == "failure";
         WarningIsCritical = leftDays <= 3 || lastRunFailed;
 
         WarningText = leftDays switch
         {
-            <= 0 => "云端 Session 已过期，云端签到会失败。请在本程序重新登录 Trae，然后点「重新部署」刷新 Secret。",
-            <= 3 => $"云端 Session 仅剩约 {leftDays} 天，建议尽快重新登录并「重新部署」，避免云端签到中断。"
+            <= 0 => "按本地时间估算，云端 Session 已过期。请点「检测云端凭证」确认；若无效，重新登录 Trae 后点「重新部署」。",
+            <= 3 => $"按本地时间估算，云端 Session 仅剩约 {leftDays} 天，建议点「检测云端凭证」复核，必要时重新登录并「重新部署」。"
                     + (lastRunFailed ? "（最近一次云端运行已失败，很可能就是这个原因）" : ""),
             _ => lastRunFailed
                     ? "云端最近一次签到运行失败，具体原因与修复方式见下方「上次云端运行结果」。"
-                    : $"云端签到使用 TRAE_SESSION 作为凭证（约 14 天有效，与换取 JWT 无关），剩余约 {leftDays} 天{est}。"
+                    : $"以下天数按本地登录时间估算，不代表云端实时状态；点「检测云端凭证」可实际验证。估算剩余约 {leftDays} 天{est}。"
         };
     }
 
@@ -992,6 +995,44 @@ public partial class CloudViewModel : ViewModelBase
         catch (Exception ex)
         {
             AppendLog("打开 Actions 失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 用户主动触发的云端凭证检测：用当前账号 Session 换取一次新 JWT 验证有效性。
+    /// 只显示有效性结论，不输出 Token、Session 或响应正文。
+    /// </summary>
+    [RelayCommand]
+    private async Task CheckCredential()
+    {
+        if (IsBusy) return;
+        var cfg = MainViewModel.AppConfig;
+        var acc = cfg?.Accounts.FirstOrDefault(a => a.Id == cfg.ActiveAccountId)
+                  ?? cfg?.Accounts.FirstOrDefault();
+        if (acc == null || string.IsNullOrEmpty(acc.Session))
+        {
+            CredentialCheckText = "当前账号没有可用的会话 Cookie，无法检测";
+            return;
+        }
+
+        CredentialCheckText = "正在检测云端凭证…";
+        IsBusy = true;
+        try
+        {
+            var api = new TraeCheckin.TraeApiClient(AccountHelpers.ResolveProxy(acc));
+            var jwt = await api.GetUserTokenAsync(acc.Session);
+            CredentialCheckText = string.IsNullOrEmpty(jwt)
+                ? "云端凭证无效或已过期，请重新登录 Trae 后重新部署"
+                : "云端凭证有效（可换取新 JWT）";
+            AppendLog("云端凭证检测：" + CredentialCheckText);
+        }
+        catch (Exception ex)
+        {
+            CredentialCheckText = "检测失败：" + ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
         }
     }
 

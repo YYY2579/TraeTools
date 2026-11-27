@@ -101,6 +101,19 @@ grep -q "SWITCH PATH SELFTEST: PASS" "$WORK/swpath.log" || { cat "$WORK/swpath.l
 grep "白名单" "$WORK/swpath.log" || true
 ok "切换相对路径解析正常（含「未创建的边车必须判不存在」的反向对照）"
 
+# ---------- 5.1 账号独立数据目录（跨平台核心逻辑） ----------
+# 新建档案会重写 machineid 并清空 aha，这两个动作一旦在 mac 上路径解析错，
+# 结果是「两个账号设备指纹相同」或「切过去未登录」，且不会报错。
+"$APP" --profile-selftest > "$WORK/profile.log" 2>&1
+grep -q "PROFILE SELFTEST: PASS" "$WORK/profile.log" || { cat "$WORK/profile.log"; fail "账号独立目录自检未通过"; }
+cat "$WORK/profile.log"
+ok "账号独立目录：machineid 唯一、aha 已清空、启动参数指向各自目录"
+
+# ---------- 5.2 保活请求体（跨平台，纯离线） ----------
+"$APP" --keepalive-selftest > "$WORK/keepalive.log" 2>&1
+grep -q "KEEPALIVE SELFTEST: PASS" "$WORK/keepalive.log" || { cat "$WORK/keepalive.log"; fail "保活请求体自检未通过"; }
+ok "保活请求体字段与模型默认值正确"
+
 # ---------- 3.5 网络与 TLS ----------
 # 签到/用量/云端全走 https://api.trae.cn。自包含 macOS 包的证书链校验走 .NET +
 # Security.framework，坏掉时表现是「签到失败：SSL/信任」，与代码逻辑无关、只在真机暴露。

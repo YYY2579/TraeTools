@@ -42,6 +42,19 @@ jobs:
       - name: Publish login host (separate process, not AOT)
         run: dotnet publish TraeTools.LoginHost/TraeTools.LoginHost.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish_aot
 
+      # 发版门禁：直接跑将要发布的 AOT 产物，避免把坏包发出去。
+      # profile-selftest 覆盖"账号独立数据目录 + machineid 隔离"，
+      # keepalive-selftest 覆盖聊天请求体，两者都是近期改动的高风险点。
+      - name: Headless self-tests (AOT artifact)
+        shell: pwsh
+        run: |
+          .\publish_aot\TraeTools.exe --profile-selftest
+          .\publish_aot\TraeTools.exe --keepalive-selftest
+          .\publish_aot\TraeTools.exe --crypto-selftest
+          .\publish_aot\TraeTools.exe --switch-path-selftest
+          .\publish_aot\TraeTools.exe --log-selftest
+          .\publish_aot\TraeTools.exe --diagnose-selftest
+
       - name: Zip distribution
         # 必须用 pwsh：Windows PowerShell 5.1 的 Compress-Archive 会把 zip 内路径分隔符写成反斜杠
         shell: pwsh
@@ -181,6 +194,19 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+
+      # tag 与 version.json 必须一致：MSI/dmg 内嵌版本取自 version.json，
+      # 而 Release 标题取自 tag。不一致会出现「发 v1.6.1、包装的却是 1.6.0」。
+      - name: Verify tag matches version.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          VER=$(python3 -c "import json;print(json.load(open('version.json'))['version'])")
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "version.json=$VER tag=$TAG"
+          if [ "$VER" != "$TAG" ]; then
+            echo "::error::version.json ($VER) 与 tag ($TAG) 不一致，先同步版本再打 tag"
+            exit 1
+          fi
 
       - name: Download packages
         uses: actions/download-artifact@v4

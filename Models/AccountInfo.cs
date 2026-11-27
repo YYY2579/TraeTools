@@ -112,8 +112,9 @@ public sealed partial class AccountCheckItem : ObservableObject
 {
     /// <summary>源账号 Id。</summary>
     public required string Id { get; init; }
-    /// <summary>展示名（随账号改名同步刷新）。</summary>
-    public string Display { get; set; } = string.Empty;
+    /// <summary>展示名（随账号改名同步刷新；必须是可通知属性，否则改名后勾选框不更新）。</summary>
+    [ObservableProperty]
+    private string _display = string.Empty;
     [ObservableProperty]
     private bool _isChecked;
 

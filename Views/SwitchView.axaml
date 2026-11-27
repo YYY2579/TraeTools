@@ -34,7 +34,8 @@
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
                     <Button Classes="btn" Content="刷新" Command="{Binding RefreshListCommand}" />
-                    <Button Classes="btn-primary" Content="建档" Command="{Binding CreateProfileCommand}" />
+                    <Button Classes="btn" Content="从签到账号导入" ToolTip.Tip="只导入账号名称，不复制凭证；导入后点「新建账号」逐个登录" Command="{Binding ImportFromCheckinAccountsCommand}" />
+                    <Button Classes="btn-primary" Content="新建账号" ToolTip.Tip="建一个独立数据目录并打开专用 Trae 窗口，在里面登录该账号" Command="{Binding NewAccountAndLoginCommand}" />
                 </StackPanel>
             </Grid>
 
@@ -53,7 +54,7 @@
                                        FontFamily="Consolas" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ClientExePath}" />
                         </StackPanel>
                         <StackPanel Grid.Column="2" Spacing="3">
-                            <TextBlock Text="vault 路径" FontSize="11" Foreground="{DynamicResource TextSubBrush}" />
+                            <TextBlock Text="数据目录" FontSize="11" Foreground="{DynamicResource TextSubBrush}" />
                             <TextBlock Text="{Binding VaultPath}" FontSize="12" Foreground="{DynamicResource TextMainBrush}"
                                        FontFamily="Consolas" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding VaultPath}" />
                         </StackPanel>
@@ -65,7 +66,7 @@
                         <Button Classes="btn" Content="重新探测" FontSize="11" Padding="10,4" Command="{Binding ReDetectClientExeCommand}" />
                         <Button Classes="btn" Content="打开客户端目录" FontSize="11" Padding="10,4" Command="{Binding OpenClientDirCommand}" />
                         <Button Classes="btn" Content="打开数据目录" FontSize="11" Padding="10,4" Command="{Binding OpenDataDirCommand}" />
-                        <Button Classes="btn" Content="打开 vault 目录" FontSize="11" Padding="10,4" Command="{Binding OpenVaultDirCommand}" />
+                        <Button Classes="btn" Content="打开数据目录" FontSize="11" Padding="10,4" Command="{Binding OpenVaultDirCommand}" />
                     </StackPanel>
 
                     <TextBlock Text="自动探测失败或想指定其他版本时可手动选择客户端程序；数据目录存放 config.json、签到数据库与日志。"
@@ -84,7 +85,7 @@
                                 <TextBlock Text="{Binding AccountCountText}" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
                                 <TextBlock Text="·" FontSize="11" Foreground="{DynamicResource TextSubBrush}" />
                                 <TextBlock Text="{Binding CarrierCount}" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
-                                <TextBlock Text="载体" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                                <TextBlock Text="文件数" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
                             </StackPanel>
                         </Grid>
 
@@ -134,11 +135,11 @@
                                                 <!-- 脱敏手机号（#14）：掉登录时一眼认出是哪个账号；无数据时隐藏 -->
                                                 <TextBlock FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Text="{Binding MobileText}" IsVisible="{Binding ShowMobile}" />
                                                 <StackPanel Orientation="Horizontal" Spacing="4" ClipToBounds="True">
-                                                    <TextBlock FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Text="建档 " />
+                                                    <TextBlock FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Text="创建 " />
                                                     <TextBlock FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Text="{Binding CreatedAt}" />
                                                     <TextBlock FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Text=" · " />
                                                     <TextBlock FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Text="{Binding Carriers}" />
-                                                    <TextBlock FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Text=" 载体 · " />
+                                                    <TextBlock FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Text=" 文件 · " />
                                                     <TextBlock FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Text="{Binding Similarity}" />
                                                 </StackPanel>
                                             </StackPanel>

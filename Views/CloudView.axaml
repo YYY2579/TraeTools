@@ -90,8 +90,13 @@
                             <TextBlock Text="{Binding CronExpression}" FontSize="13" FontWeight="SemiBold" FontFamily="Consolas" />
                         </StackPanel>
                         <StackPanel Grid.Row="0" Grid.Column="3" Spacing="4">
-                            <TextBlock Text="凭证有效期" FontSize="11" Foreground="{DynamicResource TextSubBrush}" />
+                            <TextBlock Text="凭证有效期（本地估算）" FontSize="11" Foreground="{DynamicResource TextSubBrush}" />
                             <TextBlock Text="{Binding CredentialExpiry}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource WarningBrush}" />
+                            <Button Classes="btn" Content="检测云端凭证" FontSize="11" Padding="8,3" HorizontalAlignment="Left"
+                                    ToolTip.Tip="用当前账号会话实际换取一次 JWT，只显示有效性，不输出凭证"
+                                    Command="{Binding CheckCredentialCommand}" />
+                            <TextBlock Text="{Binding CredentialCheckText}" FontSize="10" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource TextMutedBrush}" />
                         </StackPanel>
                         <StackPanel Grid.Row="1" Grid.Column="0" Spacing="4" Margin="0,8,0,0">
                             <TextBlock Text="上次运行" FontSize="11" Foreground="{DynamicResource TextSubBrush}" />

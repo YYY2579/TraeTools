@@ -48,11 +48,17 @@ jobs:
           wix build installer/TraeTools.wxs -arch x64 -d PublishDir=publish_aot -d ProductVersion=$ver -o TraeTools-win-x64.msi
           Get-Item TraeTools-win-x64.msi | Select-Object Name, Length
 
-      # 无界面自检：日志链路 / 失败原因归类（跨平台，纯离线）
-      - name: Headless self-tests
+      # 无界面自检：直接跑将要发布的 AOT 产物，避免"bin 能过、发布物不能跑"。
+      # 覆盖：日志链路、失败原因归类、账号独立目录、保活请求体、凭据加密。
+      - name: Headless self-tests (AOT artifact)
+        shell: pwsh
         run: |
-          dotnet bin/Release/net10.0/win-x64/TraeTools.dll --log-selftest
-          dotnet bin/Release/net10.0/win-x64/TraeTools.dll --diagnose-selftest
+          .\publish_aot\TraeTools.exe --log-selftest
+          .\publish_aot\TraeTools.exe --diagnose-selftest
+          .\publish_aot\TraeTools.exe --profile-selftest
+          .\publish_aot\TraeTools.exe --keepalive-selftest
+          .\publish_aot\TraeTools.exe --crypto-selftest
+          .\publish_aot\TraeTools.exe --switch-path-selftest
 
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
@@ -93,6 +99,10 @@ jobs:
           dotnet bin/Release/net10.0/${{ matrix.rid }}/TraeTools.dll --log-selftest
           dotnet bin/Release/net10.0/${{ matrix.rid }}/TraeTools.dll --diagnose-selftest
           dotnet bin/Release/net10.0/${{ matrix.rid }}/TraeTools.dll --switch-path-selftest
+          # 账号独立目录与保活是跨平台代码，必须在 macOS 上也跑一遍：
+          # 它们只依赖文件系统与 HttpClient，没有 Windows 专有 API。
+          dotnet bin/Release/net10.0/${{ matrix.rid }}/TraeTools.dll --profile-selftest
+          dotnet bin/Release/net10.0/${{ matrix.rid }}/TraeTools.dll --keepalive-selftest
 
   macos:
     name: macOS 包（Intel + Apple Silicon）

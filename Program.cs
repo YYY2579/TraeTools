@@ -2,6 +2,7 @@ using Avalonia;
 using System;
 using System.Diagnostics;
 using System.Net.Http;
+using System.Text.Json;
 using System.Threading;
 
 namespace TraeTools;
@@ -59,6 +60,16 @@ sealed class Program
             Environment.Exit(RunUpdateSwapSelftest());
             return;
         }
+        if (Array.Exists(args, a => a == "--keepalive-selftest"))
+        {
+            Environment.Exit(RunKeepAliveSelftest());
+            return;
+        }
+        if (Array.Exists(args, a => a == "--profile-selftest"))
+        {
+            Environment.Exit(RunProfileSelftest());
+            return;
+        }
 
         // CI 冒烟需要知道启动到底走到哪一步：Rosetta 转译下 /usr/bin/sample 的栈回溯是坏的，
         // 只能靠程序自己打点。stderr 会并进 app.log。
@@ -107,6 +118,78 @@ sealed class Program
 #endif
             .WithInterFont()
             .LogToTrace();
+
+    /// <summary>
+    /// 保活请求体自检：纯离线，不发网络请求，不输出凭证。
+    /// </summary>
+    private static int RunKeepAliveSelftest()
+    {
+        var body = TraeTools.Services.Usage.KeepAliveClient.BuildBody(
+            TraeTools.Services.Usage.KeepAliveClient.DefaultModel, "selftest-session");
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+        bool ok = root.TryGetProperty("user_input", out var input)
+                  && input.GetString() == TraeTools.Services.Usage.KeepAliveClient.TestMessage
+                  && root.TryGetProperty("model_name", out var model)
+                  && model.GetString() == TraeTools.Services.Usage.KeepAliveClient.DefaultModel
+                  && root.TryGetProperty("session_id", out var sid)
+                  && sid.GetString() == "selftest-session"
+                  && root.TryGetProperty("variables", out var variables)
+                  && variables.ValueKind == JsonValueKind.Null
+                  && root.EnumerateObject().Count() == 16;
+        Console.WriteLine(ok ? "KEEPALIVE SELFTEST: PASS" : "KEEPALIVE SELFTEST: FAIL");
+        return ok ? 0 : 1;
+    }
+
+    /// <summary>
+    /// 独立数据目录自检：在临时目录造两个账号档案，验证 machineid 互不相同、
+    /// 启动参数指向各自目录、账号标识哈希可读。全程离线，不碰真实账号数据。
+    /// </summary>
+    private static int RunProfileSelftest()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "traetools_profile_selftest_" + Guid.NewGuid().ToString("N"));
+        bool ok = true;
+        try
+        {
+            var live = Path.Combine(tmp, "live");
+            var storageDir = Path.Combine(live, "User", "globalStorage");
+            Directory.CreateDirectory(storageDir);
+            var sampleJson = "{\"iCubeAuthInfo://usertag\":\"selftest-account\",\"iCubeAuthInfo://icube.cloudide\":\"selftest-token\"}";
+            File.WriteAllText(Path.Combine(storageDir, "storage.json"), sampleJson);
+            File.WriteAllText(Path.Combine(live, "machineid"), Guid.NewGuid().ToString("D"));
+            Directory.CreateDirectory(Path.Combine(live, "aha"));
+            File.WriteAllText(Path.Combine(live, "aha", "TinyStorage"), "selftest");
+
+            TraeSwitch.Services.ProfileIsolation.CreateProfile("selftest-A", live);
+            TraeSwitch.Services.ProfileIsolation.CreateProfile("selftest-B", live);
+
+            var a = TraeSwitch.Services.ProfileIsolation.ProfileDir("selftest-A");
+            var b = TraeSwitch.Services.ProfileIsolation.ProfileDir("selftest-B");
+            var midA = File.ReadAllText(Path.Combine(a, "machineid"));
+            var midB = File.ReadAllText(Path.Combine(b, "machineid"));
+            bool distinct = midA != midB;
+            bool ahaCleared = !File.Exists(Path.Combine(a, "aha", "TinyStorage"));
+            bool argsOk = TraeSwitch.Services.ProfileIsolation.BuildLaunchArgument("selftest-A").Contains(a)
+                          && TraeSwitch.Services.ProfileIsolation.BuildLaunchArgument("selftest-B").Contains(b);
+            bool idsOk = TraeSwitch.Services.AuthProbe.IdentityHash(Path.Combine(a, "User", "globalStorage", "storage.json")) != null;
+            ok = distinct && ahaCleared && argsOk && idsOk
+                 && TraeSwitch.Services.ProfileIsolation.IsReady("selftest-A")
+                 && TraeSwitch.Services.ProfileIsolation.IsReady("selftest-B");
+            Console.WriteLine($"PROFILE SELFTEST: {(ok ? "PASS" : "FAIL")} (distinct={distinct} ahaCleared={ahaCleared} args={argsOk} identity={idsOk})");
+        }
+        catch (Exception ex)
+        {
+            ok = false;
+            Console.WriteLine("PROFILE SELFTEST: FAIL " + ex.GetType().Name + ": " + ex.Message);
+        }
+        finally
+        {
+            try { TraeSwitch.Services.ProfileIsolation.DeleteProfile("selftest-A"); } catch { }
+            try { TraeSwitch.Services.ProfileIsolation.DeleteProfile("selftest-B"); } catch { }
+            try { Directory.Delete(tmp, recursive: true); } catch { }
+        }
+        return ok ? 0 : 1;
+    }
 
     /// <summary>
     /// 凭据加密往返自检，返回进程退出码。只探平台加密层，不碰 AppConfig 的迁移逻辑。

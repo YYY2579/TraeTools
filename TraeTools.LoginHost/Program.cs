@@ -39,7 +39,7 @@ internal static class Program
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            using var form = new LoginHostForm(opt.UserDataDir, opt.InitialToken, opt.ExpectedUid, opt.ProxyServer, opt.DebugCapture);
+            using var form = new LoginHostForm(opt.UserDataDir, opt.InitialToken, opt.ExpectedUid, opt.ProxyServer, opt.DebugCapture, opt.OutFile);
             form.FormClosing += (_, _) =>
             {
                 if (!string.IsNullOrEmpty(form.ResultToken))
@@ -103,7 +103,7 @@ internal static class Program
     }
 
     /// <summary>初始化/运行失败时把原因写回主程序，让界面能显示具体错误而不是笼统的"未获取到 Token"。</summary>
-    private static void WriteError(string outFile, string message)
+    internal static void WriteError(string outFile, string message)
     {
         try
         {

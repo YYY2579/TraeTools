@@ -401,22 +401,22 @@ public static class SecurityAudit
             return new SecurityFinding
             {
                 Title = "登录态有效期",
-                Detail = "以下账号的 Token 已过期，但可凭会话 Cookie 自动换新（签到或保活时会自动完成）："
-                         + string.Join("、", expiredWithSession) + "。建议为该账号开启保活。",
+                Detail = "以下账号的 Token 已过期，但可凭会话 Cookie 自动换新（签到或用量页手动保活时会执行）："
+                         + string.Join("、", expiredWithSession) + "。可在「用量统计」页手动点「保活」发送测试消息。",
                 Level = "warn",
             };
         if (expiringSoon.Count > 0)
             return new SecurityFinding
             {
                 Title = "登录态有效期",
-                Detail = "以下账号的 Token 将在 1 小时内过期（开启保活可自动续期）：" + string.Join("、", expiringSoon) + "。",
+                Detail = "以下账号的 Token 将在 1 小时内过期（签到会自动续期；也可在「用量统计」页手动保活）：" + string.Join("、", expiringSoon) + "。",
                 Level = "warn",
             };
         if (noSession > 0)
             return new SecurityFinding
             {
                 Title = "登录态有效期",
-                Detail = $"有 {noSession} 个账号没有会话 Cookie，Token 过期后无法自动续期，也无法保活。"
+                Detail = $"有 {noSession} 个账号没有会话 Cookie，Token 过期后无法自动续期，也无法手动保活。"
                          + "建议用「会话 Cookie 导入」方式重新添加这些账号。",
                 Level = "warn",
             };

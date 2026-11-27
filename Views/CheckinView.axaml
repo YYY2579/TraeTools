@@ -37,7 +37,8 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <CheckBox Content="{Binding Display}" IsChecked="{Binding IsChecked}" Margin="0,1,16,1" FontSize="12" />
+                                <CheckBox Content="{Binding Display}" IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                                          IsThreeState="False" Margin="0,1,16,1" FontSize="12" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>

@@ -168,6 +168,97 @@ public sealed class SwitcherService(string rootDir, VaultService vault, IClientC
         return new SwitchOutcome(kind, rollback, rels, account, detail);
     }
 
+    /// <summary>
+    /// 独立目录切换：不替换任何文件，只用 --user-data-dir 启动目标账号自己的数据目录。
+    /// 成功判据不是"有登录态"，而是 storage.json 里的账号标识哈希与档案一致——
+    /// 这能挡住"客户端仍开着旧实例、单实例转发到旧账号"的假成功。
+    /// </summary>
+    public async Task<SwitchOutcome> SwitchToProfileAsync(
+        string account, string profileDir, Action<TimeSpan>? progress = null)
+    {
+        await Task.Run(() => client.KillAll());
+        await Task.Delay(400);   // 等文件句柄释放，避免新实例读到半关闭的旧库
+
+        var storage = AuthProbe.StoragePath(profileDir);
+        var expected = AuthProbe.IdentityHash(storage);
+        var rollback = Path.Combine(Path.GetTempPath(), "traeswitch_profile_guard_" + Guid.NewGuid().ToString("N"));
+
+        try { client.Launch(profileDir); }
+        catch
+        {
+            // 没动任何文件：回滚只需用默认目录把客户端拉起来。
+            try { client.Launch(); } catch { /* 尽力恢复 */ }
+            throw;
+        }
+
+        bool runningSeen = false, identityMatched = false, credsSeen = false, authCleared = false;
+        var started = DateTime.UtcNow;
+        var deadline = started.Add(GuardTimeout);
+        while (DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(400);
+            progress?.Invoke(DateTime.UtcNow - started);
+            if (!client.IsRunning()) continue;
+            runningSeen = true;
+            var actual = AuthProbe.IdentityHash(storage);
+            if (actual != null && expected != null
+                && string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+                identityMatched = true;
+            switch (AuthProbe.HasAuthCreds(storage))
+            {
+                case false: authCleared = true; break;
+                case true: credsSeen = true; break;
+            }
+            // 两个条件都满足才算真的进入：身份匹配（是目标账号）+ 凭据齐全（真的登录了）。
+            // 只看身份会漏判"有 usertag 但没有 token"的半登录坏档案。
+            if (identityMatched && credsSeen) break;
+            if (authCleared) break;
+        }
+
+        SwitchOutcomeKind kind;
+        string detail;
+        if (!runningSeen)
+        {
+            kind = SwitchOutcomeKind.RolledBack;
+            detail = "客户端进程在守护期内未起来";
+        }
+        else if (identityMatched && credsSeen)
+        {
+            kind = SwitchOutcomeKind.Active;
+            detail = "账号标识与目标档案一致，登录凭据齐全";
+        }
+        else if (identityMatched && !credsSeen)
+        {
+            kind = SwitchOutcomeKind.RolledBack;
+            detail = "账号标识匹配但登录凭据缺失（档案不完整，切过去会显示未登录）";
+        }
+        else if (authCleared)
+        {
+            kind = SwitchOutcomeKind.RolledBack;
+            detail = "目标档案的登录凭据已被客户端清除（登录态失效，需重新登录建档）";
+        }
+        else if (credsSeen && expected == null)
+        {
+            kind = SwitchOutcomeKind.NeedsConfirm;
+            detail = "目标档案缺少账号标识，无法自动确认是否进入该账号";
+        }
+        else
+        {
+            kind = SwitchOutcomeKind.NeedsConfirm;
+            detail = credsSeen
+                ? "客户端已登录，但账号标识与目标档案不一致（可能启动到了默认目录的旧实例）"
+                : "守护期内未读到登录凭据";
+        }
+
+        if (kind == SwitchOutcomeKind.RolledBack)
+        {
+            try { await Task.Run(() => client.KillAll()); } catch { /* 忽略 */ }
+            try { client.Launch(); } catch { /* 尽力恢复 */ }
+        }
+
+        return new SwitchOutcome(kind, rollback, [], account, detail);
+    }
+
     /// <summary>守护判定为 NeedsConfirm 且用户选择回滚时调用。</summary>
     public async Task RollbackSwitchAsync(SwitchOutcome outcome)
     {

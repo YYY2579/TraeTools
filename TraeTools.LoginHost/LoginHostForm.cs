@@ -3,6 +3,7 @@ using System.Text;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
+using TraeTools.LoginHost;
 
 namespace TraeTools.Services.Login;
 
@@ -22,6 +23,7 @@ public sealed class LoginHostForm : Form
     private readonly string? _expectedUid;
     private readonly string? _proxyServer;
     private readonly bool _debugCapture;
+    private readonly string? _outFile;
     private WebView2? _webView;
     private bool _tokenObtained;
 
@@ -35,6 +37,7 @@ public sealed class LoginHostForm : Form
     private readonly List<string> _captured = new();
     private readonly Dictionary<string, string> _requestBodies = new();   // uri -> POST 请求体
     private System.Windows.Forms.Timer? _captureUiTimer;
+    private System.Windows.Forms.Timer? _tokenTimer;
     private System.Windows.Forms.Timer? _autoCloseTimer;
     private int _idleSeconds;
     private Label? _captureStatusLabel;
@@ -52,13 +55,14 @@ public sealed class LoginHostForm : Form
     /// <summary>拿到 token 后 Session Cookie 仍未出现时的补读次数（每次间隔 1 秒）。</summary>
     private const int SessionCookieRetries = 4;
 
-    public LoginHostForm(string userDataDir, string? initialToken, string? expectedUid = null, string? proxyServer = null, bool debugCapture = false)
+    public LoginHostForm(string userDataDir, string? initialToken, string? expectedUid = null, string? proxyServer = null, bool debugCapture = false, string? outFile = null)
     {
         _userDataDir = userDataDir;
         _initialToken = initialToken;
         _expectedUid = string.IsNullOrWhiteSpace(expectedUid) ? null : expectedUid.Trim();
         _proxyServer = string.IsNullOrWhiteSpace(proxyServer) ? null : proxyServer.Trim();
         _debugCapture = debugCapture;
+        _outFile = outFile;
 
         AutoScaleMode = AutoScaleMode.Dpi;
         AutoScaleDimensions = new SizeF(96F, 96F);
@@ -74,8 +78,12 @@ public sealed class LoginHostForm : Form
         var btnClose = new Button { Text = "关闭窗口", Dock = DockStyle.Right, Width = 110, Margin = new Padding(8) };
         btnClose.Click += (_, _) => Close();
 
+        var btnRetry = new Button { Text = "重试初始化", Dock = DockStyle.Right, Width = 110, Margin = new Padding(8) };
+        btnRetry.Click += async (_, _) => await InitializeAsync();
+
         var top = new Panel { Dock = DockStyle.Top, Height = 44 };
         top.Controls.Add(btnClose);
+        top.Controls.Add(btnRetry);
         var lbl = new Label
         {
             Text = "请在弹出的窗口内登录 TRAE（手机号+验证码）。登录成功后本窗口会自动识别并关闭。",
@@ -147,47 +155,80 @@ public sealed class LoginHostForm : Form
         Load += OnLoad;
     }
 
-    private async void OnLoad(object? sender, EventArgs e)
-    {
-        try
-        {
-            // 账号专属代理：经 chromium 启动参数注入 webview（host:port / scheme://…）
-            var options = new CoreWebView2EnvironmentOptions();
-            if (!string.IsNullOrEmpty(_proxyServer))
-            {
-                options.AdditionalBrowserArguments = "--proxy-server=" + _proxyServer;
-                SetStatus("当前经代理上网：" + _proxyServer, Color.RoyalBlue);
-            }
-            var env = await CoreWebView2Environment.CreateAsync(null, _userDataDir, options);
-            _webView = new WebView2 { Dock = DockStyle.Fill };
-            Controls.Add(_webView);
-            _webView.BringToFront();
-            await _webView.EnsureCoreWebView2Async(env);
-            _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
-            _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
-            _webView.NavigationCompleted += OnNavigationCompleted;
-            if (_debugCapture)
-            {
-                _webView.CoreWebView2.WebResourceResponseReceived += OnWebResourceResponseReceived;
-                const string filter = "https://api.trae.cn/*";   // 只监听业务 API 的 XHR 以补抓请求体
-                try { _webView.CoreWebView2.AddWebResourceRequestedFilter(filter, CoreWebView2WebResourceContext.XmlHttpRequest); }
-                catch { /* 过滤注册失败则只抓响应 */ }
-                _webView.CoreWebView2.WebResourceRequested += OnWebResourceRequested;
-                _captureUiTimer = new System.Windows.Forms.Timer { Interval = 1000 };
-                _captureUiTimer.Tick += (_, _) => UpdateCaptureStatus();
-                _captureUiTimer.Start();
-            }
-            NavigateTo(_addressBox?.Text ?? UsageUrl);
+    private async void OnLoad(object? sender, EventArgs e) => await InitializeAsync();
 
-            var timer = new System.Windows.Forms.Timer { Interval = 1500 };
-            timer.Tick += async (_, _) => await TryReadToken();
-            timer.Start();
-        }
-        catch (Exception ex)
+    /// <summary>
+    /// 初始化 WebView2。偶发失败（runtime 初始化/用户目录被占用）自动重试一次；
+    /// 仍失败时保留窗口、显示具体原因并回传主程序，用户可点「重试初始化」，不再一闪而过。
+    /// </summary>
+    private async Task InitializeAsync()
+    {
+        _tokenTimer?.Stop();
+        _tokenTimer?.Dispose();
+        _tokenTimer = null;
+        _captureUiTimer?.Stop();
+        _captureUiTimer?.Dispose();
+        _captureUiTimer = null;
+        if (_webView != null)
         {
-            MessageBox.Show("初始化浏览器失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            Close();
+            try { Controls.Remove(_webView); _webView.Dispose(); } catch { /* 忽略清理失败 */ }
+            _webView = null;
         }
+        SetStatus("正在加载页面…", Color.RoyalBlue);
+
+        Exception? last = null;
+        for (int attempt = 1; attempt <= 2; attempt++)
+        {
+            try
+            {
+                // 账号专属代理：经 chromium 启动参数注入 webview（host:port / scheme://…）
+                var options = new CoreWebView2EnvironmentOptions();
+                if (!string.IsNullOrEmpty(_proxyServer))
+                {
+                    options.AdditionalBrowserArguments = "--proxy-server=" + _proxyServer;
+                    SetStatus("当前经代理上网：" + _proxyServer, Color.RoyalBlue);
+                }
+                var env = await CoreWebView2Environment.CreateAsync(null, _userDataDir, options);
+                _webView = new WebView2 { Dock = DockStyle.Fill };
+                Controls.Add(_webView);
+                _webView.BringToFront();
+                await _webView.EnsureCoreWebView2Async(env);
+                _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
+                _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+                _webView.NavigationCompleted += OnNavigationCompleted;
+                if (_debugCapture)
+                {
+                    _webView.CoreWebView2.WebResourceResponseReceived += OnWebResourceResponseReceived;
+                    const string filter = "https://api.trae.cn/*";   // 只监听业务 API 的 XHR 以补抓请求体
+                    try { _webView.CoreWebView2.AddWebResourceRequestedFilter(filter, CoreWebView2WebResourceContext.XmlHttpRequest); }
+                    catch { /* 过滤注册失败则只抓响应 */ }
+                    _webView.CoreWebView2.WebResourceRequested += OnWebResourceRequested;
+                    _captureUiTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+                    _captureUiTimer.Tick += (_, _) => UpdateCaptureStatus();
+                    _captureUiTimer.Start();
+                }
+                NavigateTo(_addressBox?.Text ?? UsageUrl);
+
+                _tokenTimer = new System.Windows.Forms.Timer { Interval = 1500 };
+                _tokenTimer.Tick += async (_, _) => await TryReadToken();
+                _tokenTimer.Start();
+                return;
+            }
+            catch (Exception ex)
+            {
+                last = ex;
+                if (attempt == 1)
+                {
+                    SetStatus("浏览器初始化失败，正在自动重试…", Color.DarkOrange);
+                    await Task.Delay(1500);
+                }
+            }
+        }
+
+        var message = "初始化浏览器失败（已自动重试一次）：" + (last?.Message ?? "未知原因");
+        SetStatus(message + "。可点「重试初始化」，或关闭后使用手动粘贴 Token。", Color.Firebrick);
+        if (!string.IsNullOrWhiteSpace(_outFile))
+            Program.WriteError(_outFile!, message);
     }
 
     private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)

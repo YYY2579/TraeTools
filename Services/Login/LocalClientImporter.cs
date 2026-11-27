@@ -57,16 +57,21 @@ public static class LocalClientImporter
 #if ANDROID
         return false;
 #else
-        try
-        {
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            return ClientDirNames.Any(n => Directory.Exists(Path.Combine(appData, n)));
-        }
-        catch
-        {
-            return false;
-        }
+        try { return CandidateDirs().Any(Directory.Exists); }
+        catch { return false; }
 #endif
+    }
+
+    /// <summary>
+    /// 客户端数据目录候选：Windows 在 %APPDATA%，macOS 在 ~/Library/Application Support。
+    /// 不能用 SpecialFolder.ApplicationData 一刀切 —— .NET 在 macOS 上把它映射到 ~/.config，
+    /// 拼出来的 "%CONFIG%/Trae CN" 永远不存在，导入功能会静默失效。
+    /// </summary>
+    private static IEnumerable<string> CandidateDirs()
+    {
+        var root = TraeSwitch.Services.CarrierDefaults.ClientDataRoot;
+        foreach (var n in ClientDirNames)
+            yield return Path.Combine(root, n);
     }
 
     /// <summary>
@@ -89,9 +94,7 @@ public static class LocalClientImporter
 #else
         try
         {
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var candidates = ClientDirNames
-                .Select(n => Path.Combine(appData, n))
+            var candidates = CandidateDirs()
                 .Where(Directory.Exists)
                 .ToList();
 
