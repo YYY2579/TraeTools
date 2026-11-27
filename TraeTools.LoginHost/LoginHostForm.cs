@@ -341,8 +341,10 @@ public sealed class LoginHostForm : Form
         string? session = null;
             try
             {
-                var cookies = await _webView.CoreWebView2.CookieManager.GetCookiesAsync("https://www.trae.cn/");
-                foreach (var c in cookies)
+                var cookies = _webView?.CoreWebView2 == null
+                    ? null
+                    : await _webView.CoreWebView2.CookieManager.GetCookiesAsync("https://www.trae.cn/");
+                foreach (var c in cookies ?? Enumerable.Empty<CoreWebView2Cookie>())
                 {
                     if (c.Name == "X-Cloudide-Session")
                     {
@@ -360,8 +362,10 @@ public sealed class LoginHostForm : Form
                 await Task.Delay(1000);
                 try
                 {
-                    var cookies = await _webView.CoreWebView2.CookieManager.GetCookiesAsync("https://www.trae.cn/");
-                    foreach (var c in cookies)
+                    var cookies = _webView?.CoreWebView2 == null
+                        ? null
+                        : await _webView.CoreWebView2.CookieManager.GetCookiesAsync("https://www.trae.cn/");
+                    foreach (var c in cookies ?? Enumerable.Empty<CoreWebView2Cookie>())
                     {
                         if (c.Name == "X-Cloudide-Session")
                         {
