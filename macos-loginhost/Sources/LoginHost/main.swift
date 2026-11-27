@@ -142,8 +142,8 @@ func writeJSON(_ payload: [String: Any], to outFile: String) -> Bool {
     }
 }
 
-func writeResult(_ outFile: String, token: String, session: String?) -> Bool {
-    writeJSON(["token": token, "session": session ?? NSNull()], to: outFile)
+func writeResult(_ outFile: String, token: String, session: String?, uidConfirmed: Bool = false) -> Bool {
+    writeJSON(["token": token, "session": session ?? NSNull(), "uidConfirmed": uidConfirmed], to: outFile)
 }
 
 func writeError(_ outFile: String, _ message: String) {
@@ -161,8 +161,11 @@ final class HostController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     private var finished = false
     private var resultToken: String?
     private var resultSession: String?
-    /// 归属不符提示只打一次，避免轮询把状态栏刷成噪音。
-    private var warnedMismatch = false
+    // ---- uid 更换确认：平台会为同一手机号更换 uid（JWT data.id）。不符时不再死拦，
+    // 亮出按钮让用户一键确认「这是我的账号」，确认后回写 uidConfirmed=true。----
+    private var adoptButton: NSButton!
+    private var pendingToken: String?
+    private var uidConfirmed = false
 
     init(_ opts: Options) {
         self.opts = opts
@@ -200,14 +203,23 @@ final class HostController: NSObject, NSWindowDelegate, WKNavigationDelegate {
         status.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(status)
 
+        // uid 不符时的确认按钮（平时隐藏）。
+        adoptButton = NSButton(title: "这是我的账号，采用新 uid 继续", target: self, action: #selector(adoptUidClicked))
+        adoptButton.bezelStyle = .rounded
+        adoptButton.translatesAutoresizingMaskIntoConstraints = false
+        adoptButton.isHidden = true
+        content.addSubview(adoptButton)
+
         NSLayoutConstraint.activate([
             status.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
             status.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
             status.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -8),
+            adoptButton.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
+            adoptButton.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -6),
             webView.topAnchor.constraint(equalTo: content.topAnchor),
             webView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            webView.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -6),
+            webView.bottomAnchor.constraint(equalTo: adoptButton.topAnchor, constant: -6),
         ])
         w.contentView = content
         window = w
@@ -263,15 +275,28 @@ final class HostController: NSObject, NSWindowDelegate, WKNavigationDelegate {
             if uid == nil {
                 setStatus("⚠ 无法从 token 解析账号归属（可能官方换了格式），已按原样接受。", .systemYellow)
             } else if uid != expected {
-                if !warnedMismatch {
-                    warnedMismatch = true
-                    setStatus("⛔ 页面登录的是另一个账号（\(uid!)），与当前账号 \(expected) 不符。"
-                            + "请退出后改用当前账号手机号登录。", .systemRed)
-                }
-                // 关键：不接受、不关窗。否则就是「一闪而过 + 把别人的凭据存进当前账号」。
+                // 平台已实测会为同一手机号更换 uid，死拦会让真用户永远登不进去：
+                // 亮出确认按钮，用户点「采用新 uid」才接受（回写 uidConfirmed=true）。
+                if token == pendingToken { return }   // 同一 token 已在等确认，别重复刷状态
+                pendingToken = token
+                adoptButton.isHidden = false
+                setStatus("⛔ 页面登录 uid=\(uid!)，与账号记录（\(expected)）不符。若这是你的账号（平台更换过 uid），点下方「采用新 uid 继续」；否则请退出后改用当前账号手机号登录。", .systemRed)
                 return
+            } else {
+                // 登回正确账号：清掉等待确认状态
+                pendingToken = nil
+                adoptButton.isHidden = true
             }
         }
+        readSessionThenFinish(token: token)
+    }
+
+    /// 用户确认「这是我的账号」（平台换发 uid 场景）：按确认的 token 收尾。
+    @objc private func adoptUidClicked() {
+        guard let token = pendingToken else { return }
+        adoptButton.isHidden = true
+        uidConfirmed = true
+        setStatus("已确认采用新 uid，正在返回…", .systemGreen)
         readSessionThenFinish(token: token)
     }
 
@@ -297,7 +322,7 @@ final class HostController: NSObject, NSWindowDelegate, WKNavigationDelegate {
         pollTimer?.invalidate()
         guard let token = resultToken else { exit(2) }
         // 先落盘再退，terminate 之后没有任何代码会执行。
-        let ok = writeResult(opts.outFile, token: token, session: resultSession)
+        let ok = writeResult(opts.outFile, token: token, session: resultSession, uidConfirmed: uidConfirmed)
         exit(ok ? 0 : 4)
     }
 

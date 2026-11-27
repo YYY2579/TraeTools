@@ -14,7 +14,7 @@ public static class LoginHostClient
     /// 登录结果。Token 为空且 Error 非空 = 宿主启动/初始化失败（如 WebView2 不可用）；
     /// 整体返回 null = 用户主动取消 / 登录未完成。
     /// </summary>
-    public sealed record LoginResult(string? Token, string? Session, string? Error = null);
+    public sealed record LoginResult(string? Token, string? Session, string? Error = null, bool UidConfirmed = false);
 
     /// <summary>
     /// 宿主可执行文件名。Windows 是 .NET 宿主 TraeTools.LoginHost.exe，
@@ -142,7 +142,10 @@ public static class LoginHostClient
                 string? session = null;
                 if (doc.RootElement.TryGetProperty("session", out var s) && s.ValueKind == JsonValueKind.String)
                     session = s.GetString();
-                return new LoginResult(t.GetString(), string.IsNullOrWhiteSpace(session) ? null : session);
+                bool uidConfirmed = doc.RootElement.TryGetProperty("uidConfirmed", out var uc)
+                                    && uc.ValueKind == JsonValueKind.True;
+                return new LoginResult(t.GetString(), string.IsNullOrWhiteSpace(session) ? null : session,
+                    UidConfirmed: uidConfirmed);
             }
 
             return error is null ? null : new LoginResult(null, null, error);

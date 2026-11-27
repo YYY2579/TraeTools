@@ -82,13 +82,19 @@ public partial class LoginWindow : Window
                 return;
             }
 
-            // 身份二次校验：宿主已挡一轮，这里对返回值再校验一次（双保险）
+            // 身份二次校验：宿主已挡一轮，这里对返回值再校验一次（双保险）。
+            // 例外：UidConfirmed = 用户已在弹窗里点「采用新 uid 继续」明确确认这是本人账号
+            // （平台会为同一手机号更换 uid），此时采信弹窗登录结果并更新账号记录的 uid。
             var uid = TokenUtils.ParseAccountUid(result.Token);
             if (!string.IsNullOrEmpty(_account.AccountUid) && !string.IsNullOrEmpty(uid)
                 && uid != _account.AccountUid)
             {
-                AutoStatus.Text = $"登录的账号身份不符（当前账号 uid={_account.AccountUid}，网页登录 uid={uid}），已放弃保存。请退出网页登录后改用当前账号的手机号登录。";
-                return;
+                if (!result.UidConfirmed)
+                {
+                    AutoStatus.Text = $"登录的账号身份不符（当前账号 uid={_account.AccountUid}，网页登录 uid={uid}），已放弃保存。请退出网页登录后改用当前账号的手机号登录。";
+                    return;
+                }
+                AutoStatus.Text = $"平台已更换该账号 uid（{_account.AccountUid} → {uid}），已更新账号记录并保存登录态。";
             }
 
             _account.Token = result.Token;

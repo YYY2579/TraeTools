@@ -27,6 +27,14 @@ public sealed class LoginHostForm : Form
     private WebView2? _webView;
     private bool _tokenObtained;
 
+    // ---- uid 更换确认：平台会为同一手机号更换 uid（JWT data.id），此时防线不再死拦，
+    // 而是亮出按钮让用户一键确认「这是我的账号」，确认后随结果回传 UidConfirmed，
+    // 主程序据此更新账号记录里的旧 uid。----
+    private string? _pendingToken;     // 等待用户确认的新 uid token
+    private Button? _btnAdoptUid;
+    /// <summary>用户在弹窗里明确确认采用与新记录不符的 uid（平台换发场景）。</summary>
+    public bool UidConfirmed { get; private set; }
+
     /// <summary>登录成功后获得的 Token；未取得或用户关闭为 null/空。</summary>
     public string? ResultToken { get; private set; }
     /// <summary>X-Cloudide-Session Cookie 值（可能为 null）。</summary>
@@ -81,9 +89,24 @@ public sealed class LoginHostForm : Form
         var btnRetry = new Button { Text = "重试初始化", Dock = DockStyle.Right, Width = 110, Margin = new Padding(8) };
         btnRetry.Click += async (_, _) => await InitializeAsync();
 
+        // uid 不符时出现的确认按钮（平时隐藏）：平台为同一手机号更换 uid 的场景下，
+        // 用户点它 = 确认「这就是我的账号」，宿主接受该 token 并回传 uidConfirmed=true。
+        _btnAdoptUid = new Button { Text = "这是我的账号，采用新 uid 继续", Dock = DockStyle.Right, Width = 190, Margin = new Padding(8), Visible = false };
+        _btnAdoptUid.Click += async (_, _) =>
+        {
+            var token = _pendingToken;
+            if (string.IsNullOrEmpty(token)) return;
+            _btnAdoptUid.Visible = false;
+            _btnAdoptUid.Enabled = false;
+            UidConfirmed = true;
+            SetStatus("已确认采用新 uid，正在保存登录态…", Color.SeaGreen);
+            await AcceptTokenAsync(token);
+        };
+
         var top = new Panel { Dock = DockStyle.Top, Height = 44 };
         top.Controls.Add(btnClose);
         top.Controls.Add(btnRetry);
+        top.Controls.Add(_btnAdoptUid);
         var lbl = new Label
         {
             Text = "请在弹出的窗口内登录 TRAE（手机号+验证码）。登录成功后本窗口会自动识别并关闭。",
@@ -270,6 +293,10 @@ public sealed class LoginHostForm : Form
             // 残留的 Session Cookie 会让 trae.cn 页面在打开瞬间自动续期出"新 token"，
             // 若该 token 属于另一个平台用户，旧逻辑会立刻接受并关窗（表现为窗口一闪而过），
             // 且把别人的 token 存进当前账号。此处必须校验 JWT data.id 与期望账号一致。
+            //
+            // 平台已实测会为同一手机号更换 uid（小蒋 1976…→4162…、本案 →4732…），
+            // 死拦会让真用户永远登不进去：不符时改为亮出确认按钮，用户点「采用新 uid」
+            // 才接受（回传 UidConfirmed=true），退回正确账号则照常自动通过。
             var uid = TraeCheckin.TokenUtils.ParseAccountUid(token);
             if (!_debugCapture && _expectedUid != null)
             {
@@ -280,12 +307,38 @@ public sealed class LoginHostForm : Form
                 }
                 else if (!string.Equals(uid, _expectedUid, StringComparison.Ordinal))
                 {
-                    SetStatus($"⚠ 页面登录的是另一个账号（uid={uid}），与当前账号不符！请退出登录后改用当前账号的手机号登录。", Color.Firebrick);
-                    return;   // 不接受、不关窗，等用户切回正确账号
+                    if (token == _pendingToken) return;   // 同一 token 已在等确认，别重复刷状态
+                    _pendingToken = token;
+                    if (_btnAdoptUid != null)
+                    {
+                        _btnAdoptUid.Visible = true;
+                        _btnAdoptUid.Enabled = true;
+                    }
+                    SetStatus($"⚠ 页面登录 uid={uid}，与账号记录（{_expectedUid}）不符。若这是你的账号（平台更换过 uid），点上方「采用新 uid 继续」；否则请退出后改用当前账号的手机号登录。", Color.Firebrick);
+                    return;
+                }
+                else
+                {
+                    // 登回正确账号：清掉等待确认状态
+                    _pendingToken = null;
+                    if (_btnAdoptUid != null) _btnAdoptUid.Visible = false;
                 }
             }
 
-            string? session = null;
+            await AcceptTokenAsync(token);
+        }
+        catch { /* 页面尚未就绪，等待下个时钟周期 */ }
+    }
+
+    /// <summary>
+    /// 接受 token 的收尾流程：读 Session Cookie（含补读重试）、落结果、关窗。
+    /// 正常通过防线与用户点「采用新 uid」两条路都汇到这里。
+    /// </summary>
+    private async Task AcceptTokenAsync(string token)
+    {
+        try
+        {
+        string? session = null;
             try
             {
                 var cookies = await _webView.CoreWebView2.CookieManager.GetCookiesAsync("https://www.trae.cn/");

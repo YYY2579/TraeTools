@@ -31,10 +31,11 @@ internal static class Program
         }
 
         if (opt.SelfTest)
-            return WriteResult(opt.OutFile, "selftest-token-" + new string('x', 48), "selftest-session") ? 0 : 4;
+            return WriteResult(opt.OutFile, "selftest-token-" + new string('x', 48), "selftest-session", uidConfirmed: false) ? 0 : 4;
 
         string? token = null;
         string? session = null;
+        bool uidConfirmed = false;
         try
         {
             Application.EnableVisualStyles();
@@ -46,6 +47,7 @@ internal static class Program
                 {
                     token = form.ResultToken;
                     session = form.ResultSession;
+                    uidConfirmed = form.UidConfirmed;
                 }
             };
             Application.Run(form);
@@ -58,7 +60,7 @@ internal static class Program
         }
 
         if (string.IsNullOrEmpty(token)) return 2;   // 用户取消 / 未取得
-        return WriteResult(opt.OutFile, token, session) ? 0 : 4;
+        return WriteResult(opt.OutFile, token, session, uidConfirmed) ? 0 : 4;
     }
 
     private static Options? ParseArgs(string[] args)
@@ -82,14 +84,15 @@ internal static class Program
         return new Options(userDataDir, outFile, initialToken, expectedUid, proxyServer, debug, selfTest);
     }
 
-    /// <summary>临时文件 + 原子替换写回结果，避免主程序读到半截 JSON。</summary>
-    private static bool WriteResult(string outFile, string token, string? session)
+    /// <summary>临时文件 + 原子替换写回结果，避免主程序读到半截 JSON。
+    /// uidConfirmed = 用户在弹窗里明确确认采用与新记录不符的 uid（平台换发场景）。</summary>
+    private static bool WriteResult(string outFile, string token, string? session, bool uidConfirmed)
     {
         try
         {
             var full = Path.GetFullPath(outFile);
             Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-            var json = JsonSerializer.Serialize(new { token, session });
+            var json = JsonSerializer.Serialize(new { token, session, uidConfirmed });
             var tmp = full + ".tmp";
             File.WriteAllText(tmp, json, Encoding.UTF8);
             File.Move(tmp, full, overwrite: true);
